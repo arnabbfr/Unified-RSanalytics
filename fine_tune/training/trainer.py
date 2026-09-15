@@ -82,8 +82,9 @@ class FoundationModelTrainer:
 
         # 5. Loss and Metrics
         self.loss_fn = build_loss_fn(self.loss_cfg)
+        eval_thresh = float(self.config.get_nested("evaluation.threshold", 0.35))
         self.metrics_tracker = SegmentationMetricsTracker(
-            threshold=0.5,
+            threshold=eval_thresh,
             ignore_index=int(self.config.get_nested("data.ignore_index", -1)),
         )
 

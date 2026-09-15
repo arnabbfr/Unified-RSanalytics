@@ -48,7 +48,10 @@ loss:
   type: combined  # Options: combined, focal_tversky, bce, dice, tversky
   bce_weight: 0.3
   dice_weight: 0.7
-  pos_weight: 3.5
+  pos_weight: 6.0
+
+evaluation:
+  threshold: 0.35
 
 checkpoint:
   dir: "fine_tune/checkpoints/terramind"

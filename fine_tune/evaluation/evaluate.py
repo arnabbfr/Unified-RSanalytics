@@ -73,8 +73,9 @@ def evaluate_checkpoint(
     model.to(device).eval()
     decoder.to(device).eval()
 
+    eval_thresh = float(config.get_nested("evaluation.threshold", 0.35))
     tracker = SegmentationMetricsTracker(
-        threshold=0.5,
+        threshold=eval_thresh,
         ignore_index=int(data_cfg.get("ignore_index", -1)),
     )
 
