@@ -36,7 +36,7 @@ class UNetDecoder(nn.Module):
         self,
         in_channels: int = 128,
         num_classes: int = 1,
-        hidden_dims: Tuple[int, ...] = (256, 128, 64, 32),
+        hidden_dims: Tuple[int, ...] = (256, 128, 64, 32, 16),
         dropout: float = 0.1,
     ):
         super().__init__()

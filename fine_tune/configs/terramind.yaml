@@ -3,7 +3,7 @@ model:
   name: terramind
   pretrained: ibm-esa-geospatial/TerraMind-1.0-base
   feature_dim: 128
-  decoder: segmentation_decoder  # Options: segmentation_decoder, unet_decoder
+  decoder: unet_decoder  # Options: segmentation_decoder, unet_decoder
   unfreeze_last_n_blocks: 2
 
 data:
@@ -31,24 +31,25 @@ data:
 
 training:
   strategy: partial  # Options: frozen, partial, full
-  epochs: 20
-  batch_size: 2
+  epochs: 25
+  batch_size: 4
   num_workers: 2  # Set 2 on Linux/Colab/Kaggle
-  learning_rate: 0.0005
-  backbone_learning_rate: 0.00005
+  learning_rate: 0.0003
+  backbone_learning_rate: 0.00003
   weight_decay: 0.01
-  gradient_accumulation_steps: 2
+  gradient_accumulation_steps: 1
   mixed_precision: true
   gradient_checkpointing: true
   max_grad_norm: 1.0
-  early_stopping_patience: 6
+  early_stopping_patience: 8
   seed: 42
 
 loss:
-  type: combined  # Options: bce, dice, combined
-  bce_weight: 0.2
-  dice_weight: 0.8
-  pos_weight: 6.0
+  type: focal_tversky  # Options: combined, focal_tversky, bce, dice, tversky
+  focal_weight: 0.4
+  tversky_weight: 0.6
+  alpha: 0.3
+  beta: 0.7
 
 checkpoint:
   dir: "fine_tune/checkpoints/terramind"
