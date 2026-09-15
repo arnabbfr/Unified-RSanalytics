@@ -65,47 +65,45 @@ def read_geotiff(path: Path | str) -> np.ndarray:
 
 def normalize_sar(
     arr: np.ndarray,
-    vv_min: float = -25.0,
+    vv_min: float = -30.0,
     vv_max: float = 0.0,
-    vh_min: float = -32.0,
+    vh_min: float = -35.0,
     vh_max: float = -5.0,
 ) -> np.ndarray:
-    """Decibel conversion and min-max feature normalization for Sentinel-1 (VV, VH)."""
+    """Decibel conversion and robust min-max normalization for Sentinel-1 (VV, VH)."""
     normed = np.zeros_like(arr, dtype=np.float32)
 
-    # Channel 0: VV
-    vv = arr[0]
-    if np.all(np.isnan(vv)):
-        normed[0] = 0.0
-    else:
-        # Check if raw linear power or already dB
-        if np.nanmin(vv) >= 0.0 and np.nanmax(vv) > 5.0:
-            vv_db = 10.0 * np.log10(np.clip(vv, 1e-5, None))
-        else:
-            vv_db = vv
-        normed[0] = np.clip((vv_db - vv_min) / (vv_max - vv_min + 1e-6), 0.0, 1.0)
-
-    # Channel 1: VH (if present)
-    if arr.shape[0] > 1:
-        vh = arr[1]
-        if np.all(np.isnan(vh)):
-            normed[1] = 0.0
-        else:
-            if np.nanmin(vh) >= 0.0 and np.nanmax(vh) > 5.0:
-                vh_db = 10.0 * np.log10(np.clip(vh, 1e-5, None))
-            else:
-                vh_db = vh
-            normed[1] = np.clip((vh_db - vh_min) / (vh_max - vh_min + 1e-6), 0.0, 1.0)
-
-    # For any additional channels (e.g. ratio or optical)
-    for c in range(2, arr.shape[0]):
+    for c in range(arr.shape[0]):
         ch = arr[c]
         if np.all(np.isnan(ch)):
             normed[c] = 0.0
+            continue
+
+        valid = ch[~np.isnan(ch)]
+        if valid.size == 0:
+            normed[c] = 0.0
+            continue
+
+        c_min = float(np.min(valid))
+
+        # 1. Determine if channel is linear power (non-negative) or already dB
+        if c_min >= 0.0:
+            ch_clipped = np.clip(ch, 1e-5, None)
+            ch_db = 10.0 * np.log10(ch_clipped)
         else:
-            c_min = float(np.nanmin(ch))
-            c_max = float(np.nanmax(ch))
-            normed[c] = np.clip((ch - c_min) / (c_max - c_min + 1e-6), 0.0, 1.0)
+            ch_db = ch
+
+        # 2. Channel-specific dB bounds
+        if c == 0:
+            b_min, b_max = vv_min, vv_max
+        elif c == 1:
+            b_min, b_max = vh_min, vh_max
+        else:
+            p2 = float(np.nanpercentile(ch_db, 2))
+            p98 = float(np.nanpercentile(ch_db, 98))
+            b_min, b_max = p2, max(p98, p2 + 1e-4)
+
+        normed[c] = np.clip((ch_db - b_min) / (b_max - b_min + 1e-6), 0.0, 1.0)
 
     return np.nan_to_num(normed, nan=0.0, posinf=1.0, neginf=0.0)
 
