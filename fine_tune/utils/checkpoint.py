@@ -28,10 +28,17 @@ class CheckpointManager:
         self.best_metric = float("-inf") if mode == "max" else float("inf")
 
     def is_better(self, current: float) -> bool:
-        """Evaluate if the current metric beats the best recorded metric."""
+        """Evaluate if the current metric beats the best recorded metric and update it."""
         if self.mode == "max":
-            return current > self.best_metric
-        return current < self.best_metric
+            if current > self.best_metric:
+                self.best_metric = current
+                return True
+            return False
+        else:
+            if current < self.best_metric:
+                self.best_metric = current
+                return True
+            return False
 
     def save(
         self,

@@ -30,25 +30,25 @@ data:
     random_crop: false
 
 training:
-  strategy: frozen  # Options: frozen, partial, full
-  epochs: 10
-  batch_size: 1
-  num_workers: 0  # 0 for safe multi-platform compatibility, set 2 on Linux/Colab
-  learning_rate: 0.0001
-  backbone_learning_rate: 0.00001
+  strategy: partial  # Options: frozen, partial, full
+  epochs: 20
+  batch_size: 2
+  num_workers: 2  # Set 2 on Linux/Colab/Kaggle
+  learning_rate: 0.0005
+  backbone_learning_rate: 0.00005
   weight_decay: 0.01
-  gradient_accumulation_steps: 4
+  gradient_accumulation_steps: 2
   mixed_precision: true
   gradient_checkpointing: true
   max_grad_norm: 1.0
-  early_stopping_patience: 5
+  early_stopping_patience: 6
   seed: 42
 
 loss:
   type: combined  # Options: bce, dice, combined
-  bce_weight: 0.5
-  dice_weight: 0.5
-  pos_weight: 1.0
+  bce_weight: 0.2
+  dice_weight: 0.8
+  pos_weight: 6.0
 
 checkpoint:
   dir: "fine_tune/checkpoints/terramind"
