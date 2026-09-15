@@ -75,27 +75,37 @@ def normalize_sar(
 
     # Channel 0: VV
     vv = arr[0]
-    # Check if raw linear power or already dB
-    if np.nanmin(vv) >= 0.0 and np.nanmax(vv) > 5.0:
-        vv_db = 10.0 * np.log10(np.clip(vv, 1e-5, None))
+    if np.all(np.isnan(vv)):
+        normed[0] = 0.0
     else:
-        vv_db = vv
-    normed[0] = np.clip((vv_db - vv_min) / (vv_max - vv_min + 1e-6), 0.0, 1.0)
+        # Check if raw linear power or already dB
+        if np.nanmin(vv) >= 0.0 and np.nanmax(vv) > 5.0:
+            vv_db = 10.0 * np.log10(np.clip(vv, 1e-5, None))
+        else:
+            vv_db = vv
+        normed[0] = np.clip((vv_db - vv_min) / (vv_max - vv_min + 1e-6), 0.0, 1.0)
 
     # Channel 1: VH (if present)
     if arr.shape[0] > 1:
         vh = arr[1]
-        if np.nanmin(vh) >= 0.0 and np.nanmax(vh) > 5.0:
-            vh_db = 10.0 * np.log10(np.clip(vh, 1e-5, None))
+        if np.all(np.isnan(vh)):
+            normed[1] = 0.0
         else:
-            vh_db = vh
-        normed[1] = np.clip((vh_db - vh_min) / (vh_max - vh_min + 1e-6), 0.0, 1.0)
+            if np.nanmin(vh) >= 0.0 and np.nanmax(vh) > 5.0:
+                vh_db = 10.0 * np.log10(np.clip(vh, 1e-5, None))
+            else:
+                vh_db = vh
+            normed[1] = np.clip((vh_db - vh_min) / (vh_max - vh_min + 1e-6), 0.0, 1.0)
 
     # For any additional channels (e.g. ratio or optical)
     for c in range(2, arr.shape[0]):
-        c_min = float(np.nanmin(arr[c]))
-        c_max = float(np.nanmax(arr[c]))
-        normed[c] = np.clip((arr[c] - c_min) / (c_max - c_min + 1e-6), 0.0, 1.0)
+        ch = arr[c]
+        if np.all(np.isnan(ch)):
+            normed[c] = 0.0
+        else:
+            c_min = float(np.nanmin(ch))
+            c_max = float(np.nanmax(ch))
+            normed[c] = np.clip((ch - c_min) / (c_max - c_min + 1e-6), 0.0, 1.0)
 
     return np.nan_to_num(normed, nan=0.0, posinf=1.0, neginf=0.0)
 
