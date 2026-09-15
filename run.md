@@ -44,34 +44,31 @@ Comprehensive guide to set up, configure, test, and run the **UpaGraha / GeoSema
 
 ---
 
-## 2. Quickstart (3 Steps)
+## 2. Quickstart (One Command)
 
-From the project root:
+From the project root, use the cross-platform launcher:
 
-```powershell
-# 1. Activate your Conda / Python environment
-conda activate ps227_sih2026
+```bash
+# Both backend and desktop UI
+python dev.py
 
-# 2. Initialize database and stage foundation models
-python scripts/init_db.py
-python scripts/create_sample_data.py
-python scripts/stage_foundation_models.py
-python scripts/export_models_to_onnx.py
-python scripts/build_index.py
+# Backend only (API at http://127.0.0.1:8000/docs)
+python dev.py backend
 
-# 3. Start the FastAPI analytics backend
-python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
+# Desktop UI only (use when backend is already running)
+python dev.py frontend
+
+# Stop the backend
+python dev.py stop
 ```
 
-Then launch the Desktop Studio:
-
-```powershell
-dotnet run --project "Desktop_App\Upgrahan2\src\GeoSemanticSat.UI\GeoSemanticSat.UI.csproj"
-```
+The launcher handles Docker startup, healthcheck gating, schema initialization, and sample data seeding automatically. See [AGENTS.md](./AGENTS.md) for details.
 
 ---
 
 ## 3. Python Analytics Backend Setup
+
+**Most developers should use `python dev.py backend` instead of the manual steps below.** These detailed instructions are for reference, troubleshooting, and air-gapped deployments without Docker.
 
 ### Option A: Conda Environment (Recommended)
 
@@ -211,6 +208,8 @@ Invoke-RestMethod -Uri "http://127.0.0.1:8000/system/status" -Method Get
 ## 8. Desktop Application Setup & Execution
 
 > **Note on Architecture:** The desktop UI performs change detection, CUSUM onset, and SIMD vector search **in-process** via `GeoSemanticSat.Core` and does not require the FastAPI backend to be running.
+
+**Most developers should use `python dev.py frontend` to launch the UI.** These detailed instructions are for reference and troubleshooting.
 
 ### Option A: Running Pre-Compiled Standalone Release (No SDK Required)
 

@@ -39,3 +39,8 @@ Jyotirmoy_SETUP.md
 .claude/
 .preview/
 skills-lock.json
+
+# Rust / Tauri frontend
+target/
+node_modules/
+Desktop_App/UpgrahanRust/src-tauri/gen/

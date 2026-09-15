@@ -121,17 +121,34 @@ database session, HTTP client, or vector index at runtime.
 
 ### Backend development
 
-```powershell
-docker compose up -d
-docker compose exec api python scripts/init_db.py
-docker compose exec api python scripts/create_sample_data.py
-docker compose exec api pytest -v
+Use the launcher from the repo root:
+
+```bash
+python dev.py backend
 ```
 
+This starts Docker, waits for the healthcheck, initializes the schema, and seeds sample rasters.
 The default database is `/app/dbdata/satintel.db` in the named `api_db` volume.
 The `./data` bind mount is for rasters and must not be used for the SQLite file.
 
+Manual equivalent (for reference, offline deployments, or troubleshooting):
+
+```powershell
+docker compose up -d --wait
+docker compose exec -T api python scripts/init_db.py
+docker compose exec -T api python scripts/create_sample_data.py
+docker compose exec -T api pytest -v
+```
+
 ### Desktop development
+
+Use the launcher from the repo root:
+
+```bash
+python dev.py frontend
+```
+
+Or run directly:
 
 ```powershell
 dotnet run --project "Desktop_App\Upgrahan2\src\GeoSemanticSat.UI\GeoSemanticSat.UI.csproj"

@@ -39,9 +39,23 @@ The current developer's assignment is the **frontend (Avalonia UI)**.
 Backend runs in Docker; the desktop UI runs natively on Windows (a GUI cannot
 usefully run in a Linux container).
 
+`dev.py` in the repo root is the one-command launcher. It starts the Docker engine if
+it is down, waits for the compose healthcheck, applies the schema, seeds the sample
+rasters on first run, and only then launches the UI. Standard library only, and it
+runs the same on Windows, macOS and Linux from any shell.
+
+```bash
+python dev.py             # backend (healthy) then the desktop UI
+python dev.py backend     # backend only
+python dev.py frontend    # desktop UI only
+python dev.py stop        # docker compose down
+```
+
+The equivalent manual commands still work unchanged:
+
 ```powershell
 # Backend — from repo root. Docker Desktop must be running first.
-docker compose up -d
+docker compose up -d --wait
 docker compose exec api python scripts/init_db.py          # first run only
 docker compose exec api python scripts/create_sample_data.py  # first run only
 # Swagger: http://127.0.0.1:8000/docs   Health: http://127.0.0.1:8000/health
@@ -66,9 +80,9 @@ dotnet test "Desktop_App\Upgrahan2\src\GeoSemanticSat.Tests\GeoSemanticSat.Tests
 
 ## Rules
 
-- **Never commit `bin/` or `obj/`.** They are already tracked (~600 files) and
-  `.gitignore` does not cover them, so every `dotnet build` dirties the tree.
-  Check `git status` before committing and stage only real source changes.
+- **Never commit build output.** `bin/`, `obj/`, `.dotnet/` and Rust `target/` are
+  covered by `.gitignore` (untracked in commit `c2cbd20`). Still check `git status`
+  before committing and stage only real source changes.
 - **Do not add `torch` usage to the backend without flagging it.** It is pinned in
   `requirements.txt` but imported nowhere. The Dockerfile deliberately installs the
   **CPU-only** build from `https://download.pytorch.org/whl/cpu`; the PyPI Linux wheel
@@ -77,6 +91,11 @@ dotnet test "Desktop_App\Upgrahan2\src\GeoSemanticSat.Tests\GeoSemanticSat.Tests
   `/app/dbdata` from the Dockerfile's `mkdir`/`chown` — the named volume inherits
   `appuser` ownership from that directory. Without it the container fails with
   `unable to open database file`.
+- **Do not write the api service's `DATABASE_URL` as `${DATABASE_URL:-...}` in
+  `docker-compose.yml`.** Compose interpolates `${DATABASE_URL}` from the project `.env`,
+  which holds the host-relative `sqlite:///./data/satintel.db` used when running the API
+  natively — so the `:-` default never applied and the database silently landed on the
+  bind mount. The container path is a literal, overridable via `API_DATABASE_URL`.
 - **Do not remove the `libexpat1` apt layer** from the Dockerfile. rasterio's bundled
   GDAL links against it and `python:3.11-slim` does not ship it.
 - **If a .NET restore fails with `NU1100: Unable to resolve ...`**, the machine has no
