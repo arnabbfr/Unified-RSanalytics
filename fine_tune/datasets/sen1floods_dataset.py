@@ -177,13 +177,57 @@ class Sen1FloodsDataset(Dataset):
                 self._apply_hash_split()
                 return
 
-        # Strategy 4: Top-level images/ and masks/
+        # Strategy 4: Top-level images/ and masks/ or nested pairs
         img_dir = self.data_root / "images"
         msk_dir = self.data_root / "masks"
         if img_dir.is_dir() and msk_dir.is_dir():
             self._load_from_dir_pair(img_dir, msk_dir)
             if len(self.samples) > 0:
                 self._apply_hash_split()
+                return
+
+        # Strategy 5: Recursive Search for 8-Channel and nested Kaggle dataset structures
+        # (e.g. dataset/Sen1Floods11_8Channel or dataset/data_8channel)
+        candidate_img_dirs = []
+        candidate_msk_dirs = []
+
+        for p in self.data_root.rglob("*"):
+            if not p.is_dir():
+                continue
+            name_lower = p.name.lower()
+            if any(k in name_lower for k in ("s1hand", "images", "8channel", "data_8channel", "source")):
+                if "mask" not in name_lower and "label" not in name_lower:
+                    candidate_img_dirs.append(p)
+            elif any(k in name_lower for k in ("labelhand", "masks", "labels", "target")):
+                candidate_msk_dirs.append(p)
+
+        for i_dir in candidate_img_dirs:
+            for m_dir in candidate_msk_dirs:
+                self._load_from_dir_pair(i_dir, m_dir)
+                if len(self.samples) > 0:
+                    self._apply_hash_split()
+                    return
+
+        # Strategy 6: Recursive file matching across all subdirectories
+        all_tifs = sorted(list(self.data_root.rglob("*.tif*")) + list(self.data_root.rglob("*.png")))
+        img_files = [f for f in all_tifs if not any(k in f.name.lower() for k in ("label", "mask", "target"))]
+        for img_path in img_files:
+            # Look for mask in same or sister directory
+            possible_msk_names = [
+                img_path.name.replace("_S1Hand", "_LabelHand").replace("_8Channel", "_LabelHand"),
+                img_path.name.replace("image", "mask").replace("s1", "label"),
+                img_path.name,
+            ]
+            for m_name in possible_msk_names:
+                for candidate in self.data_root.rglob(m_name):
+                    if candidate != img_path and candidate.is_file():
+                        self.samples.append((img_path, candidate))
+                        break
+                if len(self.samples) > 0 and self.samples[-1][0] == img_path:
+                    break
+
+        if len(self.samples) > 0:
+            self._apply_hash_split()
 
     def _load_from_csv(self, csv_path: Path) -> None:
         """Parse Sen1Floods11 split CSV containing pair filenames."""

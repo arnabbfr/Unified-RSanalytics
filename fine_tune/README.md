@@ -154,11 +154,13 @@ python fine_tune/inference/predict.py --config fine_tune/configs/terramind.yaml 
    !pip install -r fine_tune/requirements.txt
    ```
 3. **Attach Sen1Floods11 Dataset**:
-   Add the Sen1Floods11 dataset to your Kaggle notebook input (e.g. `/kaggle/input/sen1floods11`).
+   - **Kaggle Dataset Link**: [https://www.kaggle.com/datasets/oindrieelmondal/sen1floods11-8-channel-remote-sensing-dataset](https://www.kaggle.com/datasets/oindrieelmondal/sen1floods11-8-channel-remote-sensing-dataset)
+   - **In Kaggle Notebook**: Click **"+ Add Input"** (or "+ Add Data") -> Search **`sen1floods11-8-channel-remote-sensing-dataset`** -> Click **"Add"**.
+
 4. **Set environment variable**:
-   ```bash
+   ```python
    import os
-   os.environ["DATASET_ROOT"] = "/kaggle/input/sen1floods11"
+   os.environ["DATASET_ROOT"] = "/kaggle/input/sen1floods11-8-channel-remote-sensing-dataset"
    ```
 5. **Set Hugging Face token (if accessing gated weights)**:
    ```bash
