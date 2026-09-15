@@ -80,6 +80,11 @@ class SegmentationDecoder(nn.Module):
         Returns:
             Logits tensor of shape (B, num_classes, H, W).
         """
+        if isinstance(features, dict):
+            features = features["out"]
+        elif isinstance(features, (tuple, list)):
+            features = features[0]
+
         # Ensure 4D tensor (B, C, H, W)
         if features.ndim == 2:
             # Flattened embedding (B, C) -> reshape to (B, C, 1, 1) or (B, C, 7, 7)

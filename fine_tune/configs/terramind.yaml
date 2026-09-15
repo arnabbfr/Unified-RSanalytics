@@ -46,10 +46,10 @@ training:
 
 loss:
   type: focal_tversky  # Options: combined, focal_tversky, bce, dice, tversky
-  focal_weight: 0.4
-  tversky_weight: 0.6
-  alpha: 0.3
-  beta: 0.7
+  focal_weight: 0.5
+  tversky_weight: 0.5
+  alpha: 0.5
+  beta: 0.5
 
 checkpoint:
   dir: "fine_tune/checkpoints/terramind"

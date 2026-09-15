@@ -98,7 +98,24 @@ class TerraMindModel(FoundationModelBase):
         ])
         self.norm = nn.LayerNorm(embed_dim)
 
-        # 4. Multi-Scale Feature Projection Head
+        # 4. Multi-Scale Conv Stem for High-Resolution Spatial Skip Connections
+        self.stem_s2 = nn.Sequential(
+            nn.Conv2d(in_channels, 32, kernel_size=3, stride=2, padding=1, bias=False),
+            nn.BatchNorm2d(32),
+            nn.GELU(),
+        )
+        self.stem_s4 = nn.Sequential(
+            nn.Conv2d(32, 64, kernel_size=3, stride=2, padding=1, bias=False),
+            nn.BatchNorm2d(64),
+            nn.GELU(),
+        )
+        self.stem_s8 = nn.Sequential(
+            nn.Conv2d(64, 96, kernel_size=3, stride=2, padding=1, bias=False),
+            nn.BatchNorm2d(96),
+            nn.GELU(),
+        )
+
+        # 5. Multi-Scale Feature Projection Head
         self.feature_proj = nn.Sequential(
             nn.Conv2d(embed_dim, embed_dim, kernel_size=3, padding=1, bias=False),
             nn.BatchNorm2d(embed_dim),
@@ -133,9 +150,14 @@ class TerraMindModel(FoundationModelBase):
             # Offline standalone fallback
             pass
 
-    def forward(self, x: torch.Tensor, **kwargs) -> torch.Tensor:
-        """Extract spatial feature map (B, embed_dim, H_feat, W_feat)."""
+    def forward(self, x: torch.Tensor, **kwargs) -> Any:
+        """Extract multi-scale spatial feature pyramid."""
         b, c, h, w = x.shape
+
+        # Multi-scale spatial stems
+        s2 = self.stem_s2(x)
+        s4 = self.stem_s4(s2)
+        s8 = self.stem_s8(s4)
 
         # Patch embedding
         tokens, ph, pw = self.patch_embed(x)
@@ -162,10 +184,15 @@ class TerraMindModel(FoundationModelBase):
 
         # Reshape back to spatial feature map (B, embed_dim, ph, pw)
         feat_map = tokens.transpose(1, 2).view(b, self.embed_dim, ph, pw)
-        return self.feature_proj(feat_map)
+        out = self.feature_proj(feat_map)
+
+        return {
+            "out": out,
+            "skips": [s8, s4, s2],
+        }
 
     def unfreeze_last_blocks(self, num_blocks: int = 2) -> None:
-        """Freeze earlier layers and unfreeze the last N transformer blocks + projection."""
+        """Freeze earlier layers and unfreeze the last N transformer blocks + projection stems."""
         self.freeze_backbone()
         for block in self.blocks[-num_blocks:]:
             for param in block.parameters():
@@ -173,4 +200,10 @@ class TerraMindModel(FoundationModelBase):
         for param in self.norm.parameters():
             param.requires_grad = True
         for param in self.feature_proj.parameters():
+            param.requires_grad = True
+        for param in self.stem_s2.parameters():
+            param.requires_grad = True
+        for param in self.stem_s4.parameters():
+            param.requires_grad = True
+        for param in self.stem_s8.parameters():
             param.requires_grad = True

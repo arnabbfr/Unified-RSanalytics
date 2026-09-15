@@ -48,10 +48,15 @@ def setup_logger(
 class CSVLogger:
     """Logs scalar metrics per epoch to a CSV file."""
 
-    def __init__(self, file_path: str | Path, fieldnames: List[str] | None = None):
+    def __init__(self, file_path: str | Path, fieldnames: List[str] | None = None, append: bool = False):
         self.file_path = Path(file_path)
         self.file_path.parent.mkdir(parents=True, exist_ok=True)
         self.fieldnames = fieldnames or []
+        if not append and self.file_path.exists():
+            try:
+                self.file_path.unlink()
+            except Exception:
+                pass
         self._is_header_written = self.file_path.exists() and self.file_path.stat().st_size > 0
 
     def log(self, metrics: Dict[str, Any]) -> None:

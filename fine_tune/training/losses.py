@@ -164,10 +164,10 @@ class FocalTverskyLoss(nn.Module):
 
     def __init__(
         self,
-        focal_weight: float = 0.4,
-        tversky_weight: float = 0.6,
-        alpha: float = 0.3,
-        beta: float = 0.7,
+        focal_weight: float = 0.5,
+        tversky_weight: float = 0.5,
+        alpha: float = 0.5,
+        beta: float = 0.5,
         gamma: float = 2.0,
         ignore_index: int = -1,
     ):
