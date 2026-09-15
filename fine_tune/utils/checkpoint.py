@@ -104,12 +104,12 @@ class CheckpointManager:
         checkpoint = torch.load(path, map_location=map_location, weights_only=False)
 
         if "model_state_dict" in checkpoint:
-            model.load_state_dict(checkpoint["model_state_dict"])
+            model.load_state_dict(checkpoint["model_state_dict"], strict=False)
         elif "model" in checkpoint:
-            model.load_state_dict(checkpoint["model"])
+            model.load_state_dict(checkpoint["model"], strict=False)
 
         if decoder is not None and "decoder_state_dict" in checkpoint:
-            decoder.load_state_dict(checkpoint["decoder_state_dict"])
+            decoder.load_state_dict(checkpoint["decoder_state_dict"], strict=False)
 
         if optimizer is not None and "optimizer_state_dict" in checkpoint:
             optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
