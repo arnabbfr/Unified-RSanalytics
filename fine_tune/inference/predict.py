@@ -69,7 +69,7 @@ class FloodPredictor:
         checkpoint_path: str | Path,
         config_path: str | Path | None = None,
         model_name: str = "terramind",
-        threshold: float = 0.5,
+        threshold: float = 0.35,
         device: str = "auto",
     ):
         self.device = get_device(device)
