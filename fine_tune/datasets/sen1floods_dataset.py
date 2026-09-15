@@ -18,7 +18,7 @@ from fine_tune.datasets.transforms import get_transforms
 
 
 def read_geotiff(path: Path | str) -> np.ndarray:
-    """Read multi-band GeoTIFF or standard raster image safely.
+    """Read multi-band GeoTIFF, NumPy array, or standard raster image safely.
 
     Returns:
         NumPy array of shape (C, H, W) or (H, W).
@@ -27,12 +27,29 @@ def read_geotiff(path: Path | str) -> np.ndarray:
     if not path.is_file():
         raise FileNotFoundError(f"Image raster file not found: {path}")
 
-    if RASTERIO_AVAILABLE:
-        with rasterio.open(path) as src:
-            arr = src.read()  # (bands, H, W)
-            return arr.astype(np.float32)
+    # 1. NumPy file support (.npy, .npz)
+    if path.suffix.lower() in (".npy", ".npz"):
+        try:
+            arr = np.load(path)
+            if hasattr(arr, "files"):
+                arr = arr[arr.files[0]]
+            arr = arr.astype(np.float32)
+            if arr.ndim == 3 and arr.shape[-1] in (1, 2, 3, 4, 6, 8, 10, 12) and arr.shape[0] > 12:
+                arr = np.transpose(arr, (2, 0, 1))  # (H, W, C) -> (C, H, W)
+            return arr
+        except Exception as exc:
+            raise RuntimeError(f"Failed to load numpy array from {path}: {exc}") from exc
 
-    # Fallback via PIL/Pillow or NumPy
+    # 2. Rasterio GeoTIFF reading
+    if RASTERIO_AVAILABLE:
+        try:
+            with rasterio.open(path) as src:
+                arr = src.read()  # (bands, H, W)
+                return arr.astype(np.float32)
+        except Exception:
+            pass
+
+    # 3. Fallback via PIL/Pillow
     try:
         from PIL import Image
         img = Image.open(path)
@@ -145,112 +162,113 @@ class Sen1FloodsDataset(Dataset):
         self._discover_dataset_files()
 
     def _discover_dataset_files(self) -> None:
-        """Locate image/mask pairs across standard Sen1Floods11 layouts."""
+        """Locate image/mask pairs across standard Sen1Floods11 and Kaggle 8-channel layouts."""
         if not self.data_root.exists():
+            print(f"[Dataset Warning] Specified root does not exist: {self.data_root}")
             return
 
-        # Strategy 1: Split CSV file (Sen1Floods11 official splits)
-        # e.g., splits/flood_handlabeled/flood_train_data.csv
+        # 1. Search for Split CSV Files
         split_csv_candidates = [
             self.data_root / "splits" / "flood_handlabeled" / f"flood_{self.split}_data.csv",
             self.data_root / f"flood_{self.split}_data.csv",
             self.data_root / f"{self.split}.csv",
         ]
-
-        csv_found = False
         for csv_path in split_csv_candidates:
             if csv_path.is_file():
                 self._load_from_csv(csv_path)
-                csv_found = True
-                break
-
-        if csv_found and len(self.samples) > 0:
-            return
-
-        # Strategy 2: Structured split subdirectories
-        # e.g. data_root / split / "images" & data_root / split / "masks"
-        split_img_dir = self.data_root / self.split / "images"
-        split_msk_dir = self.data_root / self.split / "masks"
-        if split_img_dir.is_dir() and split_msk_dir.is_dir():
-            self._load_from_dir_pair(split_img_dir, split_msk_dir)
-            if len(self.samples) > 0:
-                return
-
-        # Strategy 3: Global HandLabeled directory
-        # e.g. data_root / "v1.1" / "data" / "flood_events" / "HandLabeled" / "S1Hand"
-        s1_hand = self.data_root / "v1.1" / "data" / "flood_events" / "HandLabeled" / "S1Hand"
-        label_hand = self.data_root / "v1.1" / "data" / "flood_events" / "HandLabeled" / "LabelHand"
-        if not s1_hand.is_dir():
-            s1_hand = self.data_root / "S1Hand"
-            label_hand = self.data_root / "LabelHand"
-
-        if s1_hand.is_dir() and label_hand.is_dir():
-            all_s1 = sorted(list(s1_hand.glob("*.tif*")))
-            for img_path in all_s1:
-                # Corresponding mask has _LabelHand or same basename in label_hand dir
-                msk_name = img_path.name.replace("_S1Hand", "_LabelHand")
-                msk_path = label_hand / msk_name
-                if not msk_path.is_file():
-                    msk_path = label_hand / img_path.name
-                if msk_path.is_file():
-                    self.samples.append((img_path, msk_path))
-
-            # Apply pseudo train/val/test split if no CSV was provided
-            if len(self.samples) > 0:
-                self._apply_hash_split()
-                return
-
-        # Strategy 4: Top-level images/ and masks/ or nested pairs
-        img_dir = self.data_root / "images"
-        msk_dir = self.data_root / "masks"
-        if img_dir.is_dir() and msk_dir.is_dir():
-            self._load_from_dir_pair(img_dir, msk_dir)
-            if len(self.samples) > 0:
-                self._apply_hash_split()
-                return
-
-        # Strategy 5: Recursive Search for 8-Channel and nested Kaggle dataset structures
-        # (e.g. dataset/Sen1Floods11_8Channel or dataset/data_8channel)
-        candidate_img_dirs = []
-        candidate_msk_dirs = []
-
-        for p in self.data_root.rglob("*"):
-            if not p.is_dir():
-                continue
-            name_lower = p.name.lower()
-            if any(k in name_lower for k in ("s1hand", "images", "8channel", "data_8channel", "source")):
-                if "mask" not in name_lower and "label" not in name_lower:
-                    candidate_img_dirs.append(p)
-            elif any(k in name_lower for k in ("labelhand", "masks", "labels", "target")):
-                candidate_msk_dirs.append(p)
-
-        for i_dir in candidate_img_dirs:
-            for m_dir in candidate_msk_dirs:
-                self._load_from_dir_pair(i_dir, m_dir)
                 if len(self.samples) > 0:
-                    self._apply_hash_split()
+                    print(f"[Dataset Discovery] Split '{self.split}': Loaded {len(self.samples)} samples from CSV {csv_path.name}")
                     return
 
-        # Strategy 6: Recursive file matching across all subdirectories
-        all_tifs = sorted(list(self.data_root.rglob("*.tif*")) + list(self.data_root.rglob("*.png")))
-        img_files = [f for f in all_tifs if not any(k in f.name.lower() for k in ("label", "mask", "target"))]
-        for img_path in img_files:
-            # Look for mask in same or sister directory
-            possible_msk_names = [
-                img_path.name.replace("_S1Hand", "_LabelHand").replace("_8Channel", "_LabelHand"),
-                img_path.name.replace("image", "mask").replace("s1", "label"),
-                img_path.name,
-            ]
-            for m_name in possible_msk_names:
-                for candidate in self.data_root.rglob(m_name):
-                    if candidate != img_path and candidate.is_file():
-                        self.samples.append((img_path, candidate))
-                        break
-                if len(self.samples) > 0 and self.samples[-1][0] == img_path:
-                    break
+        # 2. Single-pass fast recursive file discovery
+        VALID_EXTS = {".tif", ".tiff", ".png", ".jpg", ".jpeg", ".npy", ".npz"}
+        all_files = [
+            p for p in self.data_root.rglob("*")
+            if p.is_file() and p.suffix.lower() in VALID_EXTS
+        ]
 
-        if len(self.samples) > 0:
-            self._apply_hash_split()
+        if not all_files:
+            # Check one level up or down if data_root was slightly off
+            parent_root = self.data_root.parent
+            if parent_root.exists() and parent_root != self.data_root:
+                all_files = [
+                    p for p in parent_root.rglob("*")
+                    if p.is_file() and p.suffix.lower() in VALID_EXTS
+                ]
+
+        if not all_files:
+            print(f"[Dataset Warning] No raster files (.tif/.png/.npy) found in {self.data_root}")
+            return
+
+        def extract_base_id(path: Path) -> str:
+            s = path.stem.lower()
+            for noise in (
+                "_labelhand", "_s1hand", "_8channel", "_label", "_mask",
+                "_image", "_qc", "_gt", "label", "mask", "target", "source"
+            ):
+                s = s.replace(noise, "")
+            return s.strip("_- ")
+
+        # Separate masks from images
+        mask_files = []
+        img_files = []
+        for f in all_files:
+            name_lower = f.name.lower()
+            if any(k in name_lower for k in ("label", "mask", "target", "groundtruth", "gt", "qc")):
+                mask_files.append(f)
+            else:
+                img_files.append(f)
+
+        matched_pairs = []
+
+        if mask_files and img_files:
+            # Build fast hash map on cleaned base ID
+            mask_map = {extract_base_id(m): m for m in mask_files}
+            mask_name_map = {m.name: m for m in mask_files}
+
+            for img in img_files:
+                base_id = extract_base_id(img)
+                # Try ID match
+                if base_id in mask_map:
+                    matched_pairs.append((img, mask_map[base_id]))
+                else:
+                    # Try direct pattern replacements
+                    for alt_name in (
+                        img.name.replace("_S1Hand", "_LabelHand").replace("_8Channel", "_LabelHand"),
+                        img.name.replace("image", "mask").replace("s1", "label"),
+                    ):
+                        if alt_name in mask_name_map:
+                            matched_pairs.append((img, mask_name_map[alt_name]))
+                            break
+
+        if not matched_pairs and img_files:
+            # If all files are self-contained multi-band / 8-channel rasters
+            matched_pairs = [(img, img) for img in img_files]
+        elif not matched_pairs and all_files:
+            # Fallback pairing
+            matched_pairs = [(f, f) for f in all_files]
+
+        # Apply subset filter if specified
+        if self.subset != "all":
+            matched_pairs = [p for p in matched_pairs if self.subset in p[0].name.lower()]
+
+        # Apply train / val / test hash split
+        self._all_discovered_samples = matched_pairs
+        self._apply_hash_split()
+
+        # Guarantee at least some samples if hash split had zero matches
+        if len(self.samples) == 0 and len(matched_pairs) > 0:
+            n = len(matched_pairs)
+            n_train = max(1, int(0.7 * n))
+            n_val = max(1, int(0.15 * n))
+            if self.split == "train":
+                self.samples = matched_pairs[:n_train]
+            elif self.split in ("val", "valid", "validation"):
+                self.samples = matched_pairs[n_train:n_train + n_val] if n > 1 else matched_pairs
+            else:
+                self.samples = matched_pairs[n_train + n_val:] if n > 2 else matched_pairs
+
+        print(f"[Dataset Discovery] Split '{self.split}': Loaded {len(self.samples)} sample pairs (Total available: {len(matched_pairs)})")
 
     def _load_from_csv(self, csv_path: Path) -> None:
         """Parse Sen1Floods11 split CSV containing pair filenames."""
