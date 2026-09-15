@@ -31,27 +31,27 @@ data:
 
 training:
   strategy: partial  # Options: frozen, partial, full
-  epochs: 30
+  epochs: 25
   batch_size: 4
   num_workers: 2  # Set 2 on Linux/Colab/Kaggle
-  learning_rate: 0.0005
-  backbone_learning_rate: 0.00005
+  learning_rate: 0.0003
+  backbone_learning_rate: 0.00003
   weight_decay: 0.01
   gradient_accumulation_steps: 1
   mixed_precision: true
   gradient_checkpointing: true
   max_grad_norm: 1.0
-  early_stopping_patience: 12
+  early_stopping_patience: 10
   seed: 42
 
 loss:
   type: combined  # Options: combined, focal_tversky, bce, dice, tversky
-  bce_weight: 0.3
-  dice_weight: 0.7
-  pos_weight: 6.0
+  bce_weight: 0.5
+  dice_weight: 0.5
+  pos_weight: 2.0
 
 evaluation:
-  threshold: 0.35
+  threshold: 0.50
 
 checkpoint:
   dir: "fine_tune/checkpoints/terramind"
