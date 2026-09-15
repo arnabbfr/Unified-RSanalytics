@@ -37,9 +37,14 @@ def say(message: str) -> None:
     print(f"==> {message}", flush=True)
 
 
-def run(command: list[str]) -> None:
+def run(command: list[str], cwd: Path = ROOT) -> None:
     """Run a command with its output attached to this terminal."""
-    result = subprocess.run(command, cwd=ROOT)
+    # Resolve through PATH ourselves. On Windows npm is npm.CMD, a batch file, and
+    # CreateProcess will not launch it from a bare "npm" - it raises FileNotFoundError.
+    # dotnet and cargo happen to be real .exe files, which is why only npm tripped on it.
+    executable = shutil.which(command[0]) or command[0]
+
+    result = subprocess.run([executable, *command[1:]], cwd=cwd)
     if result.returncode != 0:
         raise LauncherError(f"`{' '.join(command)}` failed with exit code {result.returncode}.")
 
@@ -155,10 +160,10 @@ def start_frontend(ui: str = "avalonia") -> None:
 
         if not (TAURI_APP / "node_modules").is_dir():
             say("Installing frontend packages (first run)")
-            run(["npm", "--prefix", str(TAURI_APP), "install", "--no-audit", "--no-fund"])
+            run(["npm", "install", "--no-audit", "--no-fund"], cwd=TAURI_APP)
 
         say("Desktop UI (Rust/Tauri): npm run desktop")
-        run(["npm", "--prefix", str(TAURI_APP), "run", "desktop"])
+        run(["npm", "run", "desktop"], cwd=TAURI_APP)
         return
 
     require("dotnet", "Install the .NET 10 SDK.")
