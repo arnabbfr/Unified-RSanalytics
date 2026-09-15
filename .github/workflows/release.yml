@@ -198,9 +198,115 @@ jobs:
           path: dist/artifacts/*
           if-no-files-found: error
 
+  build-tauri:
+    name: Build Rust/Tauri Frontend (${{ matrix.platform_name }})
+    needs: test
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            rid: win-x64
+            rust_target: x86_64-pc-windows-msvc
+            platform_name: Windows x64
+          - os: ubuntu-latest
+            rid: linux-x64
+            rust_target: x86_64-unknown-linux-gnu
+            platform_name: Linux x64
+          - os: macos-latest
+            rid: osx-arm64
+            rust_target: aarch64-apple-darwin
+            platform_name: macOS Apple Silicon (ARM64)
+
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 10 SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+          dotnet-quality: 'preview'
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust_target }}
+
+      - name: Cache Cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            Desktop_App/UpgrahanRust/src-tauri/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('Desktop_App/UpgrahanRust/src-tauri/Cargo.toml') }}
+
+      # WebKitGTK is the Linux webview Tauri renders into; Windows uses the
+      # preinstalled WebView2 and macOS uses WKWebView, so neither needs this.
+      - name: Install Linux WebView Dependencies
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+
+      - name: Ensure NuGet Source
+        run: dotnet nuget add source https://api.nuget.org/v3/index.json -n nuget.org || true
+
+      # The Tauri app spawns gss-daemon to reach GeoSemanticSat.Core, so it has to
+      # be published self-contained and land next to the app binary.
+      - name: Publish Analysis Daemon
+        shell: bash
+        run: |
+          dotnet publish Desktop_App/Upgrahan2/src/GeoSemanticSat.Daemon/GeoSemanticSat.Daemon.csproj             -c Release -r ${{ matrix.rid }} --self-contained true             -o daemon-dist             --nowarn:NU1903,NU1902,NU1904
+
+      - name: Install Frontend Packages
+        working-directory: Desktop_App/UpgrahanRust
+        run: npm ci --no-audit --no-fund
+
+      - name: Build Tauri Application
+        working-directory: Desktop_App/UpgrahanRust
+        run: npm run desktop:build -- --target ${{ matrix.rust_target }}
+
+      - name: Package Portable Archive
+        shell: bash
+        run: |
+          mkdir -p dist/artifacts staging
+          BIN_DIR="Desktop_App/UpgrahanRust/src-tauri/target/${{ matrix.rust_target }}/release"
+
+          if [ "${{ matrix.os }}" = "windows-latest" ]; then
+            cp "$BIN_DIR/upgrahan-rust.exe" staging/UpaGraha.exe
+          elif [ "${{ matrix.os }}" = "macos-latest" ]; then
+            cp -R "$BIN_DIR/bundle/macos/UpaGraha.app" staging/ 2>/dev/null || cp "$BIN_DIR/upgrahan-rust" staging/UpaGraha
+          else
+            cp "$BIN_DIR/upgrahan-rust" staging/UpaGraha
+            chmod +x staging/UpaGraha
+          fi
+
+          cp -r daemon-dist/. staging/
+
+          if [ "${{ matrix.os }}" = "windows-latest" ]; then
+            7z a -tzip "dist/artifacts/GeoSemanticSat-Tauri-${{ matrix.rid }}.zip" ./staging/*
+          else
+            tar -czvf "dist/artifacts/GeoSemanticSat-Tauri-${{ matrix.rid }}.tar.gz" -C staging .
+          fi
+
+      - name: Upload Tauri Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-tauri-${{ matrix.rid }}
+          path: dist/artifacts/*
+          if-no-files-found: error
+
   publish-release:
     name: Publish GitHub Release
-    needs: build
+    needs: [build, build-tauri]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Source Code
@@ -300,6 +406,9 @@ jobs:
             release-assets/GeoSemanticSat-Desktop-linux-x64.tar.gz
             release-assets/GeoSemanticSat-Desktop-osx-arm64.tar.gz
             release-assets/GeoSemanticSat-Desktop-osx-x64.tar.gz
+            release-assets/GeoSemanticSat-Tauri-win-x64.zip
+            release-assets/GeoSemanticSat-Tauri-linux-x64.tar.gz
+            release-assets/GeoSemanticSat-Tauri-osx-arm64.tar.gz
             release-assets/SHA256SUMS.txt
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

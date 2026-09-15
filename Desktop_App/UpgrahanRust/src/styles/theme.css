@@ -1,0 +1,143 @@
+/*
+ * Design tokens, taken from Cap (cap.so) - apps/desktop/src/styles/theme.css.
+ *
+ * Three layers, in the order Cap uses them:
+ *   1. Radix Colors v3 primitives (gray/blue/red/jade/yellow, 1..12) - imported, not authored.
+ *   2. The --ed-* editor surface set. This is Cap's most distinctive layer: a flat
+ *      window/card/stage hierarchy, translucent hairlines, one accent. It is the right fit
+ *      here because this app is an editor-like canvas, not a settings-heavy chrome app.
+ *   3. Change-type hues, which are ours - Cap has no equivalent concept.
+ *
+ * Dark is the default and the primary target; light is a full swap, not a partial override.
+ */
+
+@import "@radix-ui/colors/gray.css";
+@import "@radix-ui/colors/gray-dark.css";
+@import "@radix-ui/colors/gray-alpha.css";
+@import "@radix-ui/colors/blue.css";
+@import "@radix-ui/colors/blue-dark.css";
+@import "@radix-ui/colors/red.css";
+@import "@radix-ui/colors/red-dark.css";
+@import "@radix-ui/colors/jade.css";
+@import "@radix-ui/colors/jade-dark.css";
+@import "@radix-ui/colors/yellow.css";
+@import "@radix-ui/colors/yellow-dark.css";
+
+:root {
+  /* Editor surfaces - light */
+  --ed-window: #f1f1f3;
+  --ed-card: #ffffff;
+  --ed-card-2: #f6f6f7;
+  --ed-stage: #e9e9ec;
+  --ed-line: rgba(0, 0, 0, 0.075);
+  --ed-line-strong: rgba(0, 0, 0, 0.12);
+  --ed-text-1: #1c1c1e;
+  --ed-text-2: #6e6e75;
+  --ed-text-3: #a0a0a8;
+  --ed-ctl: rgba(0, 0, 0, 0.045);
+  --ed-ctl-hover: rgba(0, 0, 0, 0.075);
+  --ed-ctl-active: rgba(0, 0, 0, 0.11);
+  --ed-accent: #007aff;
+  --ed-accent-2: #2b8cff;
+  --ed-playhead: #ff3b30;
+  --ed-thumb: #ffffff;
+  --ed-card-shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 0 0 1px var(--ed-line);
+  --ed-pop-shadow: 0 12px 32px -12px rgba(0, 0, 0, 0.25), 0 0 0 1px var(--ed-line);
+
+  --shadow-s: 0px 8px 16px 0px rgba(18, 22, 31, 0.04);
+
+  /*
+   * Change-type hues. Ours, not Cap's. One per ChangeType in Core/Model/ChangeType.cs,
+   * chosen to read as categorical rather than as a severity ramp - a Candidate's type is a
+   * classification, never a ranking. Evidence score carries strength separately.
+   */
+  --type-construction: #c2410c;
+  --type-clearance: #a16207;
+  --type-water: #0369a1;
+  --type-road: #6d28d9;
+  --type-activity: #a16207;
+  --type-nochange: var(--ed-text-3);
+
+  /* Analyst verdict states, matching CONTEXT.md vocabulary. */
+  --verdict-verified: #1fd8a4;
+  --verdict-candidate: #3b9eff;
+  --verdict-rejected: #ff9592;
+  --verdict-pending: var(--ed-text-2);
+}
+
+:root.dark {
+  /* Editor surfaces - dark */
+  --ed-window: #131315;
+  --ed-card: #1b1b1e;
+  --ed-card-2: #202024;
+  --ed-stage: #121214;
+  --ed-line: rgba(255, 255, 255, 0.08);
+  --ed-line-strong: rgba(255, 255, 255, 0.13);
+  --ed-text-1: #f4f4f5;
+  --ed-text-2: #9a9aa3;
+  --ed-text-3: #62626a;
+  --ed-ctl: rgba(255, 255, 255, 0.06);
+  --ed-ctl-hover: rgba(255, 255, 255, 0.09);
+  --ed-ctl-active: rgba(255, 255, 255, 0.13);
+  --ed-accent: #0a84ff;
+  --ed-accent-2: #3d9bff;
+  --ed-playhead: #ff453a;
+  --ed-thumb: #e8e8ea;
+  --ed-card-shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 0 0 1px var(--ed-line),
+    inset 0 1px 0 rgba(255, 255, 255, 0.03);
+  --ed-pop-shadow: 0 16px 40px -12px rgba(0, 0, 0, 0.6), 0 0 0 1px var(--ed-line);
+
+  --shadow-s: 0px 8px 16px 0px rgba(0, 0, 0, 0.4);
+
+  /* Lifted for contrast against the dark stage; same hue family as light. */
+  --type-construction: #f97362;
+  --type-clearance: #e0b341;
+  --type-water: #48b0e8;
+  --type-road: #a78bfa;
+  --type-activity: #e0b341;
+
+  /* Cap overrides the low end of the Radix dark gray ramp rather than taking it as shipped. */
+  --gray-1: #111111;
+  --gray-2: #1c1c1c;
+  --gray-3: #282828;
+  --gray-4: #323232;
+  --gray-5: #3a3a3a;
+  --gray-6: #444444;
+  --gray-11: #a1a1a1;
+}
+
+/*
+ * Cap's signature button bevel: a 1.5px inset highlight along the top edge, so solid
+ * buttons read as very slightly raised instead of flat. Inverts in dark mode.
+ */
+.dark-button-shadow {
+  box-shadow: 0 1.5px 0 0 rgba(255, 255, 255, 0.2) inset;
+}
+.dark .dark-button-shadow {
+  box-shadow: 0 1.5px 0 0 rgba(0, 0, 0, 0.1) inset;
+}
+.gray-button-shadow {
+  box-shadow: 0 1.5px 0 0 rgba(255, 255, 255, 0.4) inset;
+}
+.dark .gray-button-shadow {
+  box-shadow: 0 1.5px 0 0 rgba(255, 255, 255, 0.1) inset;
+}
+
+@keyframes shimmer {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

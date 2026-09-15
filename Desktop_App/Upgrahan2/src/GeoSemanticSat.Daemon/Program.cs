@@ -55,12 +55,31 @@ builder.Services.ConfigureHttpJsonOptions(o =>
 
 builder.Services.AddSingleton<AnalysisSession>();
 
+// The Tauri frontend runs on its own origin, so calls to this daemon are cross-origin and
+// the webview enforces CORS on them. Only the webview origins are allowed - not "*" - so a
+// page in an ordinary browser still cannot read responses even if it guessed the port.
+const string WebviewCors = "webview";
+builder.Services.AddCors(o => o.AddPolicy(WebviewCors, policy => policy
+    .WithOrigins(
+        "http://tauri.localhost",    // Tauri v2 on Windows
+        "https://tauri.localhost",
+        "tauri://localhost",         // Tauri v2 on macOS and Linux
+        "http://localhost:5183")     // vite dev server
+    .AllowAnyHeader()
+    .AllowAnyMethod()));
+
 var app = builder.Build();
+
+app.UseCors(WebviewCors);
 
 // Every route except /health requires the token.
 app.Use(async (ctx, next) =>
 {
-    if (ctx.Request.Path.StartsWithSegments("/health"))
+    // A CORS preflight cannot carry the token header - the browser decides what to send,
+    // and it never forwards custom headers on OPTIONS. Rejecting it here would block every
+    // cross-origin call before the real request was ever made.
+    if (HttpMethods.IsOptions(ctx.Request.Method) ||
+        ctx.Request.Path.StartsWithSegments("/health"))
     {
         await next();
         return;

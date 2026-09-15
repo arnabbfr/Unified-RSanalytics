@@ -18,7 +18,8 @@ An air-gapped satellite / Earth-observation intelligence platform, split in two:
 | Half | Path | Stack |
 | :--- | :--- | :--- |
 | Analytics backend | `app/` | Python 3.11, FastAPI, rasterio, torch, faiss, SQLAlchemy |
-| Desktop studio | `Desktop_App/Upgrahan2/` | .NET 10, C#, Avalonia 11.2.5, ONNX Runtime |
+| Desktop studio | `Desktop_App/Upgrahan2/` | .NET 10, C#, Avalonia 11.3.4, ONNX Runtime |
+| Desktop studio (experimental) | `Desktop_App/UpgrahanRust/` | Rust, Tauri 2, SolidJS, Tailwind v4, MapLibre |
 
 `Desktop_App/Upgrahan2/src/` contains `GeoSemanticSat.Core` (change detection,
 CUSUM onset, DBSCAN clustering, vector index), `.Engine` (embeddings, retrieval),
@@ -26,11 +27,25 @@ CUSUM onset, DBSCAN clustering, vector index), `.Engine` (embeddings, retrieval)
 
 ## Architecture fact that changes how you work
 
-**The desktop UI does not call the FastAPI backend.** There is no `:8000` reference
-anywhere in the C# source. The UI does its analysis in-process through
-`GeoSemanticSat.Core` and fetches basemap tiles from public CDNs via
-`HybridTileService`. Do not "wire the UI to the API" or assume a running backend
+**Neither desktop UI calls the FastAPI backend.** There is no `:8000` reference
+anywhere in the C# source. Do not "wire a UI to the API" or assume a running backend
 unless explicitly asked — changing that is an architecture decision, not a fix.
+
+The two frontends reach `GeoSemanticSat.Core` differently, and this distinction matters:
+
+| Frontend | How it reaches Core |
+| :--- | :--- |
+| Avalonia (`GeoSemanticSat.UI`) | In-process, direct calls |
+| Tauri (`Desktop_App/UpgrahanRust/`) | Over `GeoSemanticSat.Daemon`, a local HTTP sidecar |
+
+`GeoSemanticSat.Daemon` is **not** the Python API. It is a .NET host that references the
+same `Core`/`Engine` projects, so both frontends execute identical analysis code and produce
+identical numbers. That is deliberate: it makes an A/B between the two UIs a comparison of
+the interface rather than of the algorithms. `DaemonContractTests` enforces it.
+
+The daemon binds `127.0.0.1` on an **ephemeral** port behind a per-process bearer token and
+prints `{"ready":true,"port":N,"token":"..."}` as one JSON line on stdout. Do not give it a
+fixed port and do not bind anything but loopback.
 
 The current developer's assignment is the **frontend (Avalonia UI)**.
 
@@ -45,10 +60,12 @@ rasters on first run, and only then launches the UI. Standard library only, and 
 runs the same on Windows, macOS and Linux from any shell.
 
 ```bash
-python dev.py             # backend (healthy) then the desktop UI
-python dev.py backend     # backend only
-python dev.py frontend    # desktop UI only
-python dev.py stop        # docker compose down
+python dev.py                        # backend (healthy) then the desktop UI
+python dev.py backend                # backend only
+python dev.py frontend               # desktop UI only (Avalonia, the default)
+python dev.py frontend --ui=tauri    # desktop UI only (experimental Rust/Tauri)
+python dev.py sidecar                # analysis daemon alone, for poking the API with curl
+python dev.py stop                   # docker compose down
 ```
 
 The equivalent manual commands still work unchanged:
@@ -124,5 +141,15 @@ dotnet test "Desktop_App\Upgrahan2\src\GeoSemanticSat.Tests\GeoSemanticSat.Tests
   `app/models/entities.py` uses plain SQLAlchemy columns and needs no geometry types.
 - Don't add dependencies to `requirements.txt` or a `.csproj` without asking —
   this is an air-gapped-target project and every package has to be vendorable offline.
-- Match the existing style: `.axaml` + code-behind in the UI (no MVVM framework is
+- Match the existing style: `.axaml` + code-behind in the Avalonia UI (no MVVM framework is
   in use), and plain xunit `[Fact]` tests.
+- **The Rust frontend clones cap.so's design language deliberately.** Colours come only from
+  the semantic tokens in `src/styles/theme.css` (`--ed-*` surfaces, Radix Colors primitives).
+  Never write a raw hex or a Tailwind default palette colour in a component; the one
+  exception is reading CSS custom properties for MapLibre paint properties, which cannot
+  take classes.
+- **`CONTEXT.md` vocabulary is binding in both UIs.** Result vs Candidate vs Verified mean
+  three different things; similarity is -1..1 and is never shown at or below zero; the
+  evidence score ranks candidates and must never be rendered as "N% likely".
+- **`ChangeRecord.Id` is a fresh GUID on every detection run.** Do not persist a selection
+  by candidate id across a re-detect — the same physical site gets a new id each pass.

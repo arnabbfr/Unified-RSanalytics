@@ -1,0 +1,186 @@
+import { createResource, createSignal, For, Show } from "solid-js";
+import IconSearch from "~icons/lucide/search";
+import IconSparkles from "~icons/lucide/sparkles";
+import { Button } from "~/components/Button";
+import {
+  Badge,
+  Card,
+  EmptyState,
+  formatCoord,
+  formatDate,
+  Select,
+  Skeleton,
+  SkeletonRows,
+  SimilarityScore,
+} from "~/components/ui";
+import { api, type SearchResult, type VisualRenderMode } from "~/lib/daemon";
+import { useApp } from "~/lib/store";
+
+const RENDER_MODE_LABELS: Record<VisualRenderMode, string> = {
+  TrueColorRGB: "True colour",
+  FalseColorInfrared: "False colour (infrared)",
+  SWIR_GeologicalMoisture: "SWIR (moisture)",
+  NDVI_Heatmap: "NDVI (vegetation)",
+  NDWI_WaterMap: "NDWI (water)",
+  NDBI_BuiltUpUrban: "NDBI (built-up)",
+  SAR_MicrowaveSimulation: "SAR (microwave)",
+  ThermalRadiance: "Thermal",
+  ChangeOverlay: "Change overlay",
+};
+
+const RENDER_MODES = Object.keys(RENDER_MODE_LABELS) as VisualRenderMode[];
+
+const PRESET_QUERIES = [
+  "structures near a river",
+  "deforestation or cleared land",
+  "large vehicle concentrations on open ground",
+  "new construction",
+  "runway or airfield",
+];
+
+/** Centre point of a patch's bounds, for a compact coordinate readout. */
+function patchCentre(bounds: SearchResult["patch"]["bounds"]) {
+  return {
+    latitude: (bounds.minLat + bounds.maxLat) / 2,
+    longitude: (bounds.minLon + bounds.maxLon) / 2,
+  };
+}
+
+function ResultThumbnail(props: { result: SearchResult; renderMode: VisualRenderMode }) {
+  // Renders the whole parent tile - there is no per-patch crop endpoint yet, so the
+  // thumbnail is wider than the actual result. A cropped endpoint would be a better fit.
+  const [url] = createResource(
+    () => [props.result.patch.parentTileId, props.renderMode] as const,
+    ([handle, mode]) => api.tileUrl(handle, mode),
+  );
+
+  return (
+    <Show when={url()} fallback={<Skeleton class="size-14 shrink-0 rounded-lg" />}>
+      {(src) => (
+        <img
+          src={src()}
+          alt=""
+          class="size-14 shrink-0 rounded-lg border border-ed-line object-cover"
+        />
+      )}
+    </Show>
+  );
+}
+
+function ResultRow(props: { result: SearchResult }) {
+  const [state, actions] = useApp();
+  const centre = () => patchCentre(props.result.patch.bounds);
+
+  return (
+    <Card class="flex items-center gap-3 p-3 transition-colors hover:bg-ed-ctl-hover">
+      <ResultThumbnail result={props.result} renderMode={state.renderMode} />
+
+      <div class="flex min-w-0 flex-1 flex-col gap-0.5">
+        <div class="flex items-center gap-2">
+          <span class="truncate text-[13px] text-ed-text-1">{props.result.patch.patchId}</span>
+          <Show when={props.result.patch.hasCloudOrShadow}>
+            <Badge tone="caution">Cloud/shadow</Badge>
+          </Show>
+        </div>
+        <p class="truncate text-[11px] text-ed-text-3">
+          {props.result.patch.platform} · tile {props.result.patch.parentTileId} ·{" "}
+          {formatDate(props.result.patch.timestamp)} · {formatCoord(centre())}
+        </p>
+        <p class="text-[11px] text-ed-text-3">
+          quality {props.result.patch.qualityScore.toFixed(2)}
+        </p>
+      </div>
+
+      <div class="flex shrink-0 flex-col items-end gap-2">
+        <SimilarityScore value={props.result.similarityScore} />
+        <Button
+          variant="gray"
+          size="sm"
+          onClick={() => actions.findSimilar(props.result.patch.patchId)}
+        >
+          Find similar
+        </Button>
+      </div>
+    </Card>
+  );
+}
+
+export function StageFindImages() {
+  const [state, actions] = useApp();
+  const [draft, setDraft] = createSignal(state.query);
+
+  const runSearch = (q: string) => {
+    setDraft(q);
+    void actions.search(q);
+  };
+
+  // Results at or below zero similarity are not Results at all (CONTEXT.md) - filter here
+  // so the list itself can never show one, regardless of what the daemon returns.
+  const visibleResults = () => state.results.filter((r) => r.similarityScore > 0);
+
+  return (
+    <div class="flex h-full min-h-0 flex-col">
+      <div class="shrink-0 border-b border-ed-line bg-ed-card-2 px-4 py-3">
+        <div class="flex items-center gap-2">
+          <div class="relative flex-1">
+            <IconSearch class="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-ed-text-3" />
+            <input
+              value={draft()}
+              onInput={(e) => setDraft(e.currentTarget.value)}
+              onKeyDown={(e) => e.key === "Enter" && runSearch(draft())}
+              placeholder="Describe what you're looking for…"
+              class="h-8 w-full rounded-lg border border-ed-line bg-ed-ctl pl-8 pr-2.5 text-[13px] text-ed-text-1 outline-none transition-[background-color,border-color,box-shadow] duration-200 placeholder:text-ed-text-3 focus-visible:border-ed-accent focus-visible:ring-2 focus-visible:ring-ed-accent/30"
+            />
+          </div>
+          <Button variant="blue" onClick={() => runSearch(draft())}>
+            Search
+          </Button>
+          <Select
+            value={state.renderMode}
+            onChange={(e) => actions.setRenderMode(e.currentTarget.value as VisualRenderMode)}
+          >
+            <For each={RENDER_MODES}>
+              {(mode) => <option value={mode}>{RENDER_MODE_LABELS[mode]}</option>}
+            </For>
+          </Select>
+        </div>
+
+        <Show when={state.explanation}>
+          <p class="mt-2 text-[11px] text-ed-text-3">
+            <span class="text-ed-text-3">Interpreted as: </span>
+            {state.explanation}
+          </p>
+        </Show>
+
+        <div class="mt-2.5 flex flex-wrap items-center gap-1.5">
+          <IconSparkles class="size-3.5 text-ed-text-3" />
+          <For each={PRESET_QUERIES}>
+            {(q) => (
+              <Button variant="gray" size="sm" onClick={() => runSearch(q)}>
+                {q}
+              </Button>
+            )}
+          </For>
+        </div>
+      </div>
+
+      <div class="min-h-0 flex-1 overflow-y-auto p-4">
+        <Show when={!state.searching} fallback={<SkeletonRows rows={5} />}>
+          <Show
+            when={visibleResults().length > 0}
+            fallback={
+              <EmptyState
+                title="No results yet"
+                hint="Describe a place, or run one of the preset searches above, to find images that match."
+              />
+            }
+          >
+            <div class="flex flex-col gap-2">
+              <For each={visibleResults()}>{(r) => <ResultRow result={r} />}</For>
+            </div>
+          </Show>
+        </Show>
+      </div>
+    </div>
+  );
+}

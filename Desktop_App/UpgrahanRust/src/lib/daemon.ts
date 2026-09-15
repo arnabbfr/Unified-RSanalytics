@@ -1,0 +1,281 @@
+/**
+ * Typed client for GeoSemanticSat.Daemon.
+ *
+ * Every shape here mirrors Desktop_App/Upgrahan2/src/GeoSemanticSat.Daemon/Contracts.cs.
+ * Terminology follows CONTEXT.md and must not drift:
+ *   - Result    : a Patch returned by a search. Says "this looks like what you described".
+ *                 Makes NO claim that anything changed. Similarity is -1..1, never a
+ *                 probability, and a Result at or below zero is not shown.
+ *   - Candidate : a place the system believes physically changed, which no human has
+ *                 checked yet. Always carries a change type.
+ *   - Verified  : a Candidate a human confirmed. The only state presentable as fact.
+ *   - Rejected  : a Candidate a human dismissed. A real, recorded outcome.
+ */
+
+import { invoke } from "@tauri-apps/api/core";
+
+export type ChangeType =
+  | "NoChange"
+  | "Construction"
+  | "Clearance"
+  | "WaterExtentVariation"
+  | "RoadDevelopment"
+  | "ActivityConcentration";
+
+export type SensorPlatform =
+  | "Sentinel2_Optical"
+  | "Sentinel1_SAR"
+  | "Landsat8_9"
+  | "ISRO_Bhuvan";
+
+export type VisualRenderMode =
+  | "TrueColorRGB"
+  | "FalseColorInfrared"
+  | "SWIR_GeologicalMoisture"
+  | "NDVI_Heatmap"
+  | "NDWI_WaterMap"
+  | "NDBI_BuiltUpUrban"
+  | "SAR_MicrowaveSimulation"
+  | "ThermalRadiance"
+  | "ChangeOverlay";
+
+export type ReviewStatus = "Pending" | "Confirmed" | "Rejected" | "Flagged";
+
+export interface Bbox {
+  minLon: number;
+  minLat: number;
+  maxLon: number;
+  maxLat: number;
+}
+
+export interface Coord {
+  latitude: number;
+  longitude: number;
+}
+
+export interface TileInfo {
+  handle: string;
+  tileId: string;
+  platform: SensorPlatform;
+  acquisitionTimestamp: string;
+  bounds: Bbox;
+  width: number;
+  height: number;
+  groundSamplingDistanceMeters: number;
+  cloudCoverPercentage: number;
+  /** True when the scene lacks NIR/SWIR, so indices fall back to visible-band proxies. */
+  requiresVisibleBandProxies: boolean;
+  bands: string[];
+}
+
+export interface Patch {
+  patchId: string;
+  parentTileId: string;
+  platform: SensorPlatform;
+  timestamp: string;
+  bounds: Bbox;
+  pixelX: number;
+  pixelY: number;
+  patchWidth: number;
+  patchHeight: number;
+  qualityScore: number;
+  hasCloudOrShadow: boolean;
+}
+
+/** A search Result. `similarityScore` is -1..1 and is not a confidence. */
+export interface SearchResult {
+  patch: Patch;
+  similarityScore: number;
+  distance: number;
+}
+
+/**
+ * A change Candidate. `confidence` is an evidence score in 0..1 that ranks candidates
+ * against each other - explicitly NOT a calibrated probability.
+ *
+ * Note: `id` is a fresh GUID on every detection run, so do not persist selection by id
+ * across a re-detect.
+ */
+export interface ChangeRecord {
+  id: string;
+  tileId: string;
+  bounds: Bbox;
+  center: Coord;
+  timestampT1: string;
+  timestampT2: string;
+  earliestObservationTimestamp: string;
+  type: ChangeType;
+  confidence: number;
+  affectedPixels: number;
+  areaSqMeters: number;
+  metrics: Record<string, number>;
+  processingNotes: string;
+  confirmedByAnalyst: boolean;
+  rejectedByAnalyst: boolean;
+  analystNotes: string;
+}
+
+export interface ChangeSearchResult {
+  record: ChangeRecord;
+  distanceKm: number;
+  relevanceScore: number;
+}
+
+export interface Cluster {
+  clusterId: number;
+  label: string;
+  centre: Coord;
+  enclosingBounds: Bbox;
+  memberCount: number;
+  cohesionScore: number;
+  members: Patch[];
+}
+
+export interface ReviewItem {
+  record: ChangeRecord;
+  addedTimestamp: string;
+  status: ReviewStatus;
+  analystComments: string;
+  decisionTimestamp: string | null;
+}
+
+export interface SessionStatus {
+  indexedPatches: number;
+  candidates: number;
+  highConfidenceCandidates: number;
+  reviewQueueSize: number;
+  tiles: TileInfo[];
+}
+
+export interface FocusedInspection {
+  /** base64 BMP */
+  t1: string;
+  t2: string;
+  overlay: string;
+  cropX: number;
+  cropY: number;
+  cropWidth: number;
+  cropHeight: number;
+  peakMagnitude: number;
+  meanMagnitude: number;
+}
+
+export interface IndexHeatmaps {
+  ndvi: string;
+  ndbi: string;
+  ndwi: string;
+  bsi: string;
+  cropX: number;
+  cropY: number;
+  cropWidth: number;
+  cropHeight: number;
+}
+
+interface Endpoint {
+  baseUrl: string;
+  token: string;
+}
+
+let endpoint: Endpoint | null = null;
+
+/** Starts the daemon (idempotent) and caches where to reach it. */
+export async function connect(): Promise<Endpoint> {
+  if (endpoint) return endpoint;
+
+  const resolved = await invoke<Endpoint>("start_daemon");
+
+  // Fail loudly on a malformed endpoint. Without this a missing baseUrl produces a
+  // relative fetch that quietly returns the app's own index.html, surfacing as an
+  // "Unexpected token '<'" JSON error a long way from the actual cause.
+  if (!resolved?.baseUrl || !resolved.token) {
+    throw new Error(
+      `The analysis daemon returned an unusable endpoint: ${JSON.stringify(resolved)}`,
+    );
+  }
+
+  endpoint = resolved;
+  return endpoint;
+}
+
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const ep = await connect();
+
+  const response = await fetch(`${ep.baseUrl}${path}`, {
+    ...init,
+    headers: {
+      "X-GSS-Token": ep.token,
+      ...(init?.body ? { "Content-Type": "application/json" } : {}),
+      ...init?.headers,
+    },
+  });
+
+  if (!response.ok) {
+    // The daemon returns {"error": "..."} for the cases it maps deliberately.
+    const detail = await response.json().catch(() => null);
+    throw new Error(detail?.error ?? `${init?.method ?? "GET"} ${path} failed (${response.status})`);
+  }
+
+  return response.status === 204 ? (undefined as T) : ((await response.json()) as T);
+}
+
+const post = <T>(path: string, body?: unknown): Promise<T> =>
+  request<T>(path, { method: "POST", body: body === undefined ? undefined : JSON.stringify(body) });
+
+/** URL for an image endpoint, usable directly as an <img src>. */
+export async function imageUrl(path: string): Promise<string> {
+  const ep = await connect();
+  const separator = path.includes("?") ? "&" : "?";
+  return `${ep.baseUrl}${path}${separator}token=${encodeURIComponent(ep.token)}`;
+}
+
+export const api = {
+  // session
+  init: () => post<SessionStatus>("/session/init"),
+  status: () => request<SessionStatus>("/session/status"),
+  loadGeoTiff: (path: string) => post<TileInfo>("/session/load", { path }),
+
+  // search -> Results
+  searchText: (query: string, topK = 12) =>
+    post<SearchResult[]>("/search/text", { query, topK }),
+  searchSimilar: (patchId: string, topK = 12) =>
+    post<SearchResult[]>("/search/similar", { patchId, topK }),
+  searchFeedback: (query: string, relevantPatchIds: string[], irrelevantPatchIds: string[], topK = 12) =>
+    post<SearchResult[]>("/search/feedback", { query, relevantPatchIds, irrelevantPatchIds, topK }),
+  explain: (q: string) =>
+    request<{ explanation: string }>(`/search/explain?q=${encodeURIComponent(q)}`),
+
+  // change -> Candidates
+  detect: (body: Record<string, unknown>) => post<ChangeRecord[]>("/change/detect", body),
+  candidates: () => request<ChangeRecord[]>("/change/candidates"),
+  searchChanges: (body: Record<string, unknown>) =>
+    post<ChangeSearchResult[]>("/change/search", body),
+
+  // clustering
+  cluster: (epsilonCosine = 0.22, minPoints = 2, maxDistanceKm = 50) =>
+    post<Cluster[]>("/cluster", { epsilonCosine, minPoints, maxDistanceKm }),
+
+  // review
+  review: () => request<ReviewItem[]>("/review"),
+  confirm: (id: string, notes = "") => post<void>(`/review/${id}/confirm`, { notes }),
+  reject: (id: string, notes = "") => post<void>(`/review/${id}/reject`, { notes }),
+  flag: (id: string, notes = "") => post<void>(`/review/${id}/flag`, { notes }),
+
+  // export
+  exportGeoJson: (path: string) => post<{ path: string }>("/export/geojson", { path }),
+
+  // imagery
+  tileUrl: (handle: string, mode: VisualRenderMode = "TrueColorRGB") =>
+    imageUrl(`/image/tile?handle=${encodeURIComponent(handle)}&mode=${mode}`),
+  heatmapUrl: (changeId?: string) =>
+    imageUrl(`/image/heatmap${changeId ? `?changeId=${encodeURIComponent(changeId)}` : ""}`),
+  spectralUrl: (changeId: string) => imageUrl(`/image/spectral/${encodeURIComponent(changeId)}`),
+  focused: (changeId: string, mode: VisualRenderMode = "TrueColorRGB", heatmap = "CVA") =>
+    request<FocusedInspection>(
+      `/image/focused/${encodeURIComponent(changeId)}?mode=${mode}&heatmap=${heatmap}`,
+    ),
+  indices: (changeId: string) =>
+    request<IndexHeatmaps>(`/image/indices/${encodeURIComponent(changeId)}`),
+};
+
+/** base64 BMP from the daemon -> a data URL an <img> can render. */
+export const bmpDataUrl = (base64: string) => `data:image/bmp;base64,${base64}`;

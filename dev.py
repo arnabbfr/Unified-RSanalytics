@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """Cross-platform development launcher for Unified-RSanalytics.
 
-    python dev.py             backend (started + healthy) then the desktop UI
-    python dev.py backend     backend only
-    python dev.py frontend    desktop UI only
-    python dev.py stop        stop the backend
+    python dev.py                        backend (started + healthy) then the desktop UI
+    python dev.py backend                backend only
+    python dev.py frontend               desktop UI only (Avalonia)
+    python dev.py frontend --ui=tauri    desktop UI only (experimental Rust/Tauri)
+    python dev.py sidecar                analysis daemon only, for API poking
+    python dev.py stop                   stop the backend
 
 Starts the Docker engine itself if it is not already answering. Standard library
 only, so it needs nothing beyond the Python that already builds this repo.
@@ -21,6 +23,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 UI_PROJECT = ROOT / "Desktop_App" / "Upgrahan2" / "src" / "GeoSemanticSat.UI" / "GeoSemanticSat.UI.csproj"
+DAEMON_PROJECT = ROOT / "Desktop_App" / "Upgrahan2" / "src" / "GeoSemanticSat.Daemon" / "GeoSemanticSat.Daemon.csproj"
+TAURI_APP = ROOT / "Desktop_App" / "UpgrahanRust"
 SAMPLE_RASTER = ROOT / "data" / "sample_before.tif"
 ENGINE_TIMEOUT_SECONDS = 180
 
@@ -129,10 +133,44 @@ def start_backend() -> None:
     print("    Backend ready -> http://127.0.0.1:8000/docs", flush=True)
 
 
-def start_frontend() -> None:
+def build_daemon() -> None:
+    """The Tauri app spawns gss-daemon, so it has to exist before the UI starts."""
     require("dotnet", "Install the .NET 10 SDK.")
-    say("Desktop UI: dotnet run")
+    say("Analysis daemon: dotnet build")
+    run([
+        "dotnet", "build", str(DAEMON_PROJECT),
+        "-c", "Release", "--nologo",
+        "--nowarn:NU1903,NU1902,NU1904",
+    ])
+
+
+def start_frontend(ui: str = "avalonia") -> None:
+    if ui == "tauri":
+        require("cargo", "Install Rust: https://rustup.rs")
+        require("npm", "Install Node.js 20 or newer.")
+
+        # Both frontends run the same analysis code; the Tauri one reaches it over the
+        # daemon rather than in-process, so build the daemon first.
+        build_daemon()
+
+        if not (TAURI_APP / "node_modules").is_dir():
+            say("Installing frontend packages (first run)")
+            run(["npm", "--prefix", str(TAURI_APP), "install", "--no-audit", "--no-fund"])
+
+        say("Desktop UI (Rust/Tauri): npm run desktop")
+        run(["npm", "--prefix", str(TAURI_APP), "run", "desktop"])
+        return
+
+    require("dotnet", "Install the .NET 10 SDK.")
+    say("Desktop UI (Avalonia): dotnet run")
     run(["dotnet", "run", "--project", str(UI_PROJECT)])
+
+
+def start_sidecar() -> None:
+    """Runs the analysis daemon on its own, for poking at the API with curl."""
+    build_daemon()
+    say("Analysis daemon: dotnet run  (prints its port and token as JSON)")
+    run(["dotnet", "run", "--project", str(DAEMON_PROJECT), "-c", "Release", "--no-build"])
 
 
 def stop_backend() -> None:
@@ -149,16 +187,26 @@ def main() -> int:
         "target",
         nargs="?",
         default="all",
-        choices=["all", "backend", "frontend", "stop"],
+        choices=["all", "backend", "frontend", "sidecar", "stop"],
         help="what to launch (default: all)",
     )
-    target = parser.parse_args().target
+    parser.add_argument(
+        "--ui",
+        default="avalonia",
+        choices=["avalonia", "tauri"],
+        help="which desktop frontend to run (default: avalonia)",
+    )
+    args = parser.parse_args()
+    target, ui = args.target, args.ui
+
+    frontend = lambda: start_frontend(ui)
 
     actions = {
         "backend": [start_backend],
-        "frontend": [start_frontend],
+        "frontend": [frontend],
+        "sidecar": [start_sidecar],
         "stop": [stop_backend],
-        "all": [start_backend, start_frontend],
+        "all": [start_backend, frontend],
     }
 
     try:

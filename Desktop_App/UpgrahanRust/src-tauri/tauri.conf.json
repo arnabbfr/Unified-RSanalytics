@@ -1,0 +1,53 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "UpaGraha",
+  "version": "0.1.0",
+  "identifier": "in.upagraha.geosemanticsat.rust",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:5183",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "UpaGraha",
+        "width": 1440,
+        "height": 900,
+        "minWidth": 1000,
+        "minHeight": 680,
+        "resizable": true,
+        "maximized": true,
+        "decorations": false,
+        "transparent": false,
+        "theme": "Dark",
+        "dragDropEnabled": true
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; img-src 'self' asset: data: blob: http://127.0.0.1:* https:; connect-src 'self' ipc: http://ipc.localhost http://127.0.0.1:* https:; style-src 'self' 'unsafe-inline'; worker-src 'self' blob:; font-src 'self' data:"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": [
+      "nsis",
+      "deb",
+      "appimage",
+      "dmg"
+    ],
+    "externalBin": [],
+    "resources": [],
+    "copyright": "UpaGraha / GeoSemanticSat",
+    "category": "Utility",
+    "shortDescription": "Satellite semantic retrieval and change analysis",
+    "longDescription": "Experimental Rust/Tauri frontend for the UpaGraha air-gapped Earth-observation analysis platform.",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.ico"
+    ]
+  }
+}
