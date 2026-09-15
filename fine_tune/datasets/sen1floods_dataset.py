@@ -83,6 +83,29 @@ def normalize_sar(
     return np.nan_to_num(normed, nan=0.0, posinf=1.0, neginf=0.0)
 
 
+def resolve_dataset_path(data_root: str | Path) -> Path:
+    """Resolve dataset path with auto-discovery for Kaggle and Colab environments."""
+    path = Path(data_root)
+    if path.exists():
+        return path
+
+    # Auto-detect Kaggle input directory
+    kaggle_root = Path("/kaggle/input")
+    if kaggle_root.is_dir():
+        for candidate in kaggle_root.iterdir():
+            if candidate.is_dir():
+                name_lower = candidate.name.lower()
+                if any(k in name_lower for k in ("sen1", "flood", "8channel", "dataset")):
+                    print(f"[Dataset Auto-Resolution] Located Kaggle dataset at: {candidate}")
+                    return candidate
+        subdirs = [p for p in kaggle_root.iterdir() if p.is_dir()]
+        if subdirs:
+            print(f"[Dataset Auto-Resolution] Using Kaggle dataset: {subdirs[0]}")
+            return subdirs[0]
+
+    return path
+
+
 class Sen1FloodsDataset(Dataset):
     """PyTorch Dataset for Sen1Floods11 SAR flood inundation mapping."""
 
@@ -101,7 +124,7 @@ class Sen1FloodsDataset(Dataset):
         vh_min: float = -32.0,
         vh_max: float = -5.0,
     ):
-        self.data_root = Path(data_root)
+        self.data_root = resolve_dataset_path(data_root)
         self.split = split.lower()
         self.subset = subset.lower()
         self.image_size = image_size

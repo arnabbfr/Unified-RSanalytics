@@ -10,6 +10,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from fine_tune.datasets.datamodule import build_dataloaders
+from fine_tune.datasets.sen1floods_dataset import resolve_dataset_path
 from fine_tune.evaluation.evaluate import evaluate_checkpoint
 from fine_tune.evaluation.visualize_predictions import generate_visualizations
 from fine_tune.models import build_model
@@ -56,10 +57,17 @@ def run_experiment(
     seed_everything(seed)
 
     # 2. Ensure dataset exists or generate synthetic fallback
-    dataset_root = Path(config.data.root)
-    if not dataset_root.exists() or len(list(dataset_root.glob("**/*.*"))) == 0:
-        print(f"[Dataset] Target path '{dataset_root}' is empty. Generating synthetic Sen1Floods11 sample dataset...")
-        create_synthetic_sen1floods_dataset(output_dir=dataset_root)
+    dataset_root = resolve_dataset_path(config.data.root)
+    config.data.root = str(dataset_root)
+
+    is_cloud_input = str(dataset_root).startswith("/kaggle/input")
+    if is_cloud_input:
+        if not dataset_root.exists():
+            print(f"[Dataset Notice] Target '{dataset_root}' not found. Please verify dataset is attached under /kaggle/input.")
+    else:
+        if not dataset_root.exists() or len(list(dataset_root.glob("*"))) == 0:
+            print(f"[Dataset] Local path '{dataset_root}' is empty. Generating synthetic Sen1Floods11 sample dataset...")
+            create_synthetic_sen1floods_dataset(output_dir=dataset_root)
 
     # 3. Model & Modality Validation
     try:
