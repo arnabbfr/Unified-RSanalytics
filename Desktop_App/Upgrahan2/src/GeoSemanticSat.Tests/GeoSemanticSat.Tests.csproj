@@ -20,6 +20,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\GeoSemanticSat.Core\GeoSemanticSat.Core.csproj" />
+    <ProjectReference Include="..\GeoSemanticSat.Daemon\GeoSemanticSat.Daemon.csproj" />
     <ProjectReference Include="..\GeoSemanticSat.Engine\GeoSemanticSat.Engine.csproj" />
     <ProjectReference Include="..\GeoSemanticSat.UI\GeoSemanticSat.UI.csproj" />
   </ItemGroup>
