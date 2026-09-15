@@ -61,6 +61,102 @@ def predict_raster(
     return prob, mask
 
 
+class FloodPredictor:
+    """High-level Python inference API for fine-tuned geospatial foundation models."""
+
+    def __init__(
+        self,
+        checkpoint_path: str | Path,
+        config_path: str | Path | None = None,
+        model_name: str = "terramind",
+        threshold: float = 0.5,
+        device: str = "auto",
+    ):
+        self.device = get_device(device)
+        self.threshold = threshold
+        ckpt_path = Path(checkpoint_path)
+
+        if config_path is None:
+            candidate = ckpt_path.parent / "config.yaml"
+            if candidate.exists():
+                self.config = load_config(candidate)
+            else:
+                self.config = load_config(PROJECT_ROOT / f"fine_tune/configs/{model_name}.yaml")
+        else:
+            self.config = load_config(config_path)
+
+        self.model = build_model(self.config.model, self.config.data)
+        decoder_name = self.config.get_nested("model.decoder", "segmentation_decoder")
+        num_classes = int(self.config.get_nested("data.num_classes", 1))
+        self.decoder = build_decoder(
+            decoder_name=decoder_name,
+            in_channels=self.model.feature_dim,
+            num_classes=num_classes,
+        )
+
+        ckpt_mgr = CheckpointManager(checkpoint_dir=ckpt_path.parent)
+        ckpt_mgr.load(ckpt_path, model=self.model, decoder=self.decoder, map_location=self.device)
+
+        self.model.to(self.device).eval()
+        self.decoder.to(self.device).eval()
+
+    def predict(
+        self,
+        image_path: str | Path | np.ndarray,
+        save_overlay_path: str | Path | None = None,
+    ) -> dict[str, Any]:
+        """Run flood prediction on a single raster path or numpy array."""
+        if isinstance(image_path, (str, Path)):
+            prob, mask = predict_raster(image_path, self.model, self.decoder, self.device, threshold=self.threshold)
+            raw = read_geotiff(image_path)
+        else:
+            raw = image_path
+            normed = normalize_sar(raw)
+            in_c = getattr(self.model, "in_channels", 2)
+            if normed.shape[0] > in_c:
+                normed = normed[:in_c]
+            elif normed.shape[0] < in_c:
+                normed = np.pad(normed, ((0, in_c - normed.shape[0]), (0, 0), (0, 0)), mode="edge")
+            inp = torch.from_numpy(normed).unsqueeze(0).float().to(self.device)
+            with torch.no_grad():
+                features = self.model(inp)
+                logits = self.decoder(features, target_size=(raw.shape[-2], raw.shape[-1]))
+                prob = torch.sigmoid(logits).squeeze().cpu().numpy()
+            mask = (prob >= self.threshold).astype(np.uint8)
+
+        flood_pixels = int(mask.sum())
+        total_pixels = int(mask.size)
+        flood_fraction = float(flood_pixels / max(total_pixels, 1))
+
+        if save_overlay_path and PIL_AVAILABLE:
+            save_path = Path(save_overlay_path)
+            save_path.parent.mkdir(parents=True, exist_ok=True)
+            vv = raw[0] if raw.ndim == 3 else raw
+            if np.all(np.isnan(vv)):
+                base = np.zeros_like(vv, dtype=np.uint8)
+            else:
+                if np.nanmin(vv) >= 0 and np.nanmax(vv) > 5:
+                    vv_db = 10.0 * np.log10(np.clip(vv, 1e-5, None))
+                else:
+                    vv_db = vv
+                vv_norm = np.clip((vv_db - (-25.0)) / (25.0 + 1e-6), 0.0, 1.0)
+                base = (np.nan_to_num(vv_norm, nan=0.0) * 255).astype(np.uint8)
+            rgb = np.stack([base, base, base], axis=-1)
+            # Tint flood pixels bright cyan/blue
+            rgb[mask == 1, 0] = (rgb[mask == 1, 0] * 0.2).astype(np.uint8)
+            rgb[mask == 1, 1] = np.clip(rgb[mask == 1, 1] * 0.7 + 100, 0, 255).astype(np.uint8)
+            rgb[mask == 1, 2] = 255
+            Image.fromarray(rgb).save(save_path)
+
+        return {
+            "probability": prob,
+            "mask": mask,
+            "flood_pixels": flood_pixels,
+            "total_pixels": total_pixels,
+            "flood_fraction": flood_fraction,
+        }
+
+
 def predict_directory(
     input_dir: str | Path,
     output_dir: str | Path,
