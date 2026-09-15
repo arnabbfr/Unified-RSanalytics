@@ -1,0 +1,25 @@
+# Geospatial Foundation Model Fine-Tuning Dependencies
+# Compatible with Python 3.10+ and PyTorch 2.1+
+
+# Core Deep Learning & Autograd
+torch>=2.1.0
+torchvision>=0.16.0
+
+# Foundation Models & Hugging Face Hub
+transformers>=4.38.0
+huggingface_hub>=0.20.0
+timm>=0.9.12
+einops>=0.7.0
+
+# Configuration & Utilities
+pyyaml>=6.0.1
+numpy>=1.24.0
+pandas>=2.0.0
+scikit-learn>=1.3.0
+tqdm>=4.66.0
+
+# Geospatial Raster I/O & Visualization
+rasterio>=1.3.8
+pillow>=10.0.0
+matplotlib>=3.7.0
+tensorboard>=2.14.0

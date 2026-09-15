@@ -1,0 +1,58 @@
+model:
+  name: terramind
+  pretrained: ibm-esa-geospatial/TerraMind-1.0-base
+  feature_dim: 128
+  decoder: segmentation_decoder
+  unfreeze_last_n_blocks: 2
+data:
+  dataset: sen1floods11
+  modality: sentinel1
+  channels:
+  - VV
+  - VH
+  in_channels: 2
+  image_size: 224
+  num_classes: 1
+  ignore_index: -1
+  root: fine_tune/data/sample_sen1floods11
+  subset: all
+  normalize:
+    type: sar_db_norm
+    vv_min: -25.0
+    vv_max: 0.0
+    vh_min: -32.0
+    vh_max: -5.0
+  augmentations:
+    random_flip: true
+    random_rotate: true
+    random_crop: false
+training:
+  strategy: frozen
+  epochs: 2
+  batch_size: 1
+  num_workers: 0
+  learning_rate: 0.0001
+  backbone_learning_rate: 1.0e-05
+  weight_decay: 0.01
+  gradient_accumulation_steps: 4
+  mixed_precision: true
+  gradient_checkpointing: true
+  max_grad_norm: 1.0
+  early_stopping_patience: 5
+  seed: 42
+loss:
+  type: combined
+  bce_weight: 0.5
+  dice_weight: 0.5
+  pos_weight: 1.0
+checkpoint:
+  dir: fine_tune/checkpoints/terramind
+  save_best: true
+  monitor: val_iou
+  mode: max
+results:
+  dir: fine_tune/results/terramind
+logging:
+  tensorboard: true
+  csv: true
+  log_interval: 10
