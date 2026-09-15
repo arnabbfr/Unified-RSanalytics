@@ -50,10 +50,10 @@ class UNetDecoder(nn.Module):
             nn.GELU(),
         )
 
-        # Stage 0: 14x14 (256) + skip s8 (96) -> 28x28 (128)
+        # Stage 0: 14x14 (256) + skip s8 (128) -> 28x28 (128)
         self.up0 = nn.Upsample(scale_factor=2, mode="bilinear", align_corners=False)
         self.block0 = nn.Sequential(
-            nn.Conv2d(hidden_dims[0] + 96, hidden_dims[1], kernel_size=3, padding=1, bias=False),
+            nn.Conv2d(hidden_dims[0] + 128, hidden_dims[1], kernel_size=3, padding=1, bias=False),
             nn.BatchNorm2d(hidden_dims[1]),
             nn.GELU(),
             ResidualBlock(hidden_dims[1], dropout=dropout),
@@ -80,10 +80,10 @@ class UNetDecoder(nn.Module):
             ResidualBlock(hidden_dims[2], dropout=dropout),
         )
 
-        # Stage 2: 56x56 (64) + skip s2 (32) -> 112x112 (32)
+        # Stage 2: 56x56 (64) + skip s2 (64) -> 112x112 (32)
         self.up2 = nn.Upsample(scale_factor=2, mode="bilinear", align_corners=False)
         self.block2 = nn.Sequential(
-            nn.Conv2d(hidden_dims[2] + 32, hidden_dims[3], kernel_size=3, padding=1, bias=False),
+            nn.Conv2d(hidden_dims[2] + 64, hidden_dims[3], kernel_size=3, padding=1, bias=False),
             nn.BatchNorm2d(hidden_dims[3]),
             nn.GELU(),
             ResidualBlock(hidden_dims[3], dropout=dropout),

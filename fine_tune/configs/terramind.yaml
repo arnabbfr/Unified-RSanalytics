@@ -2,7 +2,7 @@
 model:
   name: terramind
   pretrained: ibm-esa-geospatial/TerraMind-1.0-base
-  feature_dim: 128
+  feature_dim: 256
   decoder: unet_decoder  # Options: segmentation_decoder, unet_decoder
   unfreeze_last_n_blocks: 2
 

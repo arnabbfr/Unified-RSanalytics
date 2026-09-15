@@ -363,7 +363,16 @@ class Sen1FloodsDataset(Dataset):
             norm_img = np.pad(norm_img, pad_width, mode="edge")
 
         # 5. Standardize mask values (0: non-flood, 1: flood, ignore: -1/255)
-        mask = raw_msk.astype(np.int64)
+        raw_mask_int = raw_msk.astype(np.int64)
+        unique_vals = np.unique(raw_mask_int)
+        mask = np.copy(raw_mask_int)
+
+        # Handle binary {0, 255} masks where 255 represents foreground water
+        if set(unique_vals).issubset({0, 255}) and 255 in unique_vals:
+            mask[mask == 255] = 1
+        elif 255 in unique_vals and 1 in unique_vals:
+            # 255 is no-data / ignore index
+            mask[mask == 255] = -1
 
         # 6. Apply joint transforms
         if self.transform is not None:
