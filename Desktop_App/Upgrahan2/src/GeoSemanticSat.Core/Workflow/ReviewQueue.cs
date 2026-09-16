@@ -111,6 +111,14 @@ public class ReviewQueue
             if (item == null) return false;
             item.Status = "Flagged";
             item.AnalystComments = notes;
+            // Mirror the note onto the record, as Confirm and Reject do. Without this the
+            // exported provenance showed a flagged candidate with empty notes and both
+            // analyst booleans false - identical to one nobody had looked at. CONTEXT.md is
+            // explicit that a recorded outcome is not the same as "not yet reviewed".
+            item.Record.AnalystNotes = notes;
+            // Flagged is "needs another look", so it asserts neither confirmed nor rejected.
+            item.Record.ConfirmedByAnalyst = false;
+            item.Record.RejectedByAnalyst = false;
             item.DecisionTimestamp = DateTime.UtcNow;
             return true;
         }

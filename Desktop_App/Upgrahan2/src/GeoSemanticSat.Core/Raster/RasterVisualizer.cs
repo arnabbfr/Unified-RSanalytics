@@ -37,6 +37,14 @@ public static class RasterVisualizer
         int height = -1,
         VisualRenderMode mode = VisualRenderMode.TrueColorRGB)
     {
+        // Clamp the ORIGIN before deriving the size from it. Previously a negative startX
+        // made the default width tile.Width - startX (larger than the tile), and the clamp
+        // that followed used the same unvalidated startX as its upper bound, so it never
+        // constrained anything: the result was an oversized image padded with a repeated
+        // edge pixel and a header reporting dimensions the tile does not have.
+        startX = Math.Clamp(startX, 0, Math.Max(0, tile.Width - 1));
+        startY = Math.Clamp(startY, 0, Math.Max(0, tile.Height - 1));
+
         if (width <= 0) width = tile.Width - startX;
         if (height <= 0) height = tile.Height - startY;
 

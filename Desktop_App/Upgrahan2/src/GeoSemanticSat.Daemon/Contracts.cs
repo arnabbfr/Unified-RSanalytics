@@ -183,9 +183,22 @@ public static class Contracts
             MinQuality);
     }
 
-    public record TextSearchRequest(string Query, int TopK = 10, SearchFilterDto? Filter = null);
+    public record TextSearchRequest(string Query, int TopK = 10, SearchFilterDto? Filter = null)
+    {
+        public void Validate() => RequirePositiveTopK(TopK);
+    }
 
-    public record SimilarSearchRequest(string PatchId, int TopK = 10);
+    /// <summary>A non-positive topK returned an empty list, which reads as "nothing matched".</summary>
+    internal static void RequirePositiveTopK(int topK)
+    {
+        if (topK <= 0)
+            throw new ArgumentOutOfRangeException(nameof(topK), topK, "TopK must be greater than zero.");
+    }
+
+    public record SimilarSearchRequest(string PatchId, int TopK = 10)
+    {
+        public void Validate() => RequirePositiveTopK(TopK);
+    }
 
     public record FeedbackSearchRequest(
         string Query,
@@ -219,6 +232,18 @@ public static class Contracts
         string? Keyword = null,
         int TopK = 50)
     {
+        public void Validate()
+        {
+            RequirePositiveTopK(TopK);
+            // A negative radius silently behaved as "no radius filter", so a typo widened
+            // the search instead of narrowing it.
+            if (RadiusKm is < 0)
+                throw new ArgumentOutOfRangeException(
+                    nameof(RadiusKm), RadiusKm, "RadiusKm cannot be negative.");
+            if (StartDate is { } start && EndDate is { } end && end < start)
+                throw new ArgumentException("EndDate cannot be earlier than StartDate.", nameof(EndDate));
+        }
+
         public ChangeSearchCriteria ToCore() => new(
             Center?.ToCore(),
             RadiusKm,
@@ -238,7 +263,22 @@ public static class Contracts
 
     public record ExportRequest(string Path);
 
-    public record GenerateArchiveRequest(double Latitude, double Longitude);
+    public record GenerateArchiveRequest(double Latitude, double Longitude)
+    {
+        /// <summary>
+        /// Rejects impossible coordinates. Without this the daemon happily built an archive
+        /// at latitude 90.5 or longitude -500 and reported those bounds back.
+        /// </summary>
+        public void Validate()
+        {
+            if (double.IsNaN(Latitude) || Latitude is < -90 or > 90)
+                throw new ArgumentOutOfRangeException(
+                    nameof(Latitude), Latitude, "Latitude must be between -90 and 90.");
+            if (double.IsNaN(Longitude) || Longitude is < -180 or > 180)
+                throw new ArgumentOutOfRangeException(
+                    nameof(Longitude), Longitude, "Longitude must be between -180 and 180.");
+        }
+    }
 
     public record BenchmarkRequest(string OutputDirectory);
 

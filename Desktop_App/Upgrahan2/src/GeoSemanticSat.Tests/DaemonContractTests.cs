@@ -3,6 +3,9 @@ using System.Collections.Generic;
 using System.Linq;
 using GeoSemanticSat.Core.ChangeDetection;
 using GeoSemanticSat.Core.Model;
+using System.IO;
+using System.Text.Json;
+using GeoSemanticSat.Core.Raster;
 using GeoSemanticSat.Core.Synthetic;
 using GeoSemanticSat.Daemon;
 
@@ -128,6 +131,105 @@ public class DaemonContractTests
         Assert.True(item.Record.ConfirmedByAnalyst);
         Assert.False(item.Record.RejectedByAnalyst);
         Assert.Equal("verified against collateral", item.Record.AnalystNotes);
+    }
+
+    /// <summary>
+    /// A non-positive patch size used to never terminate the scan loop: the bound
+    /// (height - patchSize) grows while the counter steps by a negative stride, and a stride
+    /// of zero never advances. Because callers hold a lock for the duration, one such request
+    /// hung the whole process with no error and no way back short of killing it.
+    /// </summary>
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    [InlineData(-8)]
+    public void DetectChanges_RejectsNonPositivePatchSize_RatherThanHanging(int patchSize)
+    {
+        var archive = SyntheticScene.BuildDemoArchive();
+        var options = new MultiTemporalChangeDetector.ChangeDetectionOptions(PatchSize: patchSize);
+
+        // The point is that this returns at all. Before the guard it never came back.
+        var thrown = Record.Exception(
+            () => MultiTemporalChangeDetector.DetectChanges(archive[0], archive[2], options));
+
+        Assert.IsType<ArgumentOutOfRangeException>(thrown);
+    }
+
+    /// <summary>
+    /// CONTEXT.md: a recorded outcome is not the same as "not yet reviewed". Flagging used to
+    /// set only the queue item's comment, leaving the record's notes empty and both analyst
+    /// booleans false - so an exported flagged candidate was indistinguishable from an
+    /// untouched one.
+    /// </summary>
+    [Fact]
+    public void Flagging_RecordsTheNoteOnTheRecord_NotJustTheQueueItem()
+    {
+        var session = new AnalysisSession();
+        session.Initialize();
+
+        var target = session.Candidates().First();
+        Assert.True(session.Flag(target.Id, "revisit once the cloud clears"));
+
+        var item = session.Review().Single(i => i.Record.Id == target.Id);
+        Assert.Equal("Flagged", item.Status);
+        Assert.Equal("revisit once the cloud clears", item.AnalystComments);
+        Assert.Equal("revisit once the cloud clears", item.Record.AnalystNotes);
+
+        // Flagged asserts neither outcome - it means "look again".
+        Assert.False(item.Record.ConfirmedByAnalyst);
+        Assert.False(item.Record.RejectedByAnalyst);
+    }
+
+    /// <summary>
+    /// RFC 8259 forbids a byte-order mark. With one present the ordinary
+    /// open(path) + json.loads fails on the first character.
+    /// </summary>
+    [Fact]
+    public void ProvenanceExport_HasNoByteOrderMark_AndParsesAsGeoJson()
+    {
+        var session = new AnalysisSession();
+        session.Initialize();
+
+        string path = Path.Combine(Path.GetTempPath(), $"gss-prov-{Guid.NewGuid():N}.geojson");
+        try
+        {
+            session.ExportGeoJson(path);
+
+            byte[] head = File.ReadAllBytes(path).Take(3).ToArray();
+            Assert.False(head.SequenceEqual(new byte[] { 0xEF, 0xBB, 0xBF }), "export starts with a UTF-8 BOM");
+
+            using var parsed = JsonDocument.Parse(File.ReadAllText(path));
+            Assert.Equal("FeatureCollection", parsed.RootElement.GetProperty("type").GetString());
+        }
+        finally
+        {
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
+
+    /// <summary>
+    /// A negative crop origin made the default width tile.Width - startX, which is larger
+    /// than the tile, and the clamp that followed used the same unvalidated origin as its
+    /// bound so it never constrained anything. The result was an oversized image padded with
+    /// a repeated edge pixel, reporting dimensions the tile does not have.
+    /// </summary>
+    [Fact]
+    public void RenderTile_ClampsNegativeCropOrigin_ToTheTileItself()
+    {
+        var tile = SyntheticScene.BuildDemoArchive()[0];
+
+        using var stream = RasterVisualizer.RenderTileToBmpStream(tile, startX: -50, startY: -50);
+        byte[] bmp = stream.ToArray();
+
+        Assert.Equal((byte)'B', bmp[0]);
+        Assert.Equal((byte)'M', bmp[1]);
+
+        // Width and height live at offsets 18 and 22 of a BITMAPINFOHEADER.
+        int width = BitConverter.ToInt32(bmp, 18);
+        int height = Math.Abs(BitConverter.ToInt32(bmp, 22));
+
+        Assert.InRange(width, 1, tile.Width);
+        Assert.InRange(height, 1, tile.Height);
     }
 
     /// <summary>Onset is a CUSUM estimate over the series, not simply the T1 acquisition date.</summary>

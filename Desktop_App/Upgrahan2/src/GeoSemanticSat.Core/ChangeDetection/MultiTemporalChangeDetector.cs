@@ -82,6 +82,15 @@ public class MultiTemporalChangeDetector
 
         List<ChangeRecord> changes = new();
 
+        // A non-positive patchSize never terminates: the bound (h - patchSize) grows while
+        // the counter steps by a negative stride, so `py <= h - patchSize` is always true,
+        // and a stride of 0 never advances at all. Because every caller holds a lock for the
+        // duration, that turned one bad request into a permanent hang of the whole process
+        // rather than an error. Reject it up front instead.
+        if (patchSize <= 0)
+            throw new ArgumentOutOfRangeException(
+                nameof(options), patchSize, "PatchSize must be greater than zero.");
+
         for (int py = 0; py <= h - patchSize; py += patchSize)
         {
             for (int px = 0; px <= w - patchSize; px += patchSize)

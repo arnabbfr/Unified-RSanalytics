@@ -113,6 +113,18 @@ app.Use(async (ctx, next) =>
         ctx.Response.StatusCode = StatusCodes.Status404NotFound;
         await ctx.Response.WriteAsJsonAsync(new { error = ex.Message });
     }
+    catch (DirectoryNotFoundException ex)
+    {
+        // Exporting to a path whose parent does not exist used to escape as a bare 500 with
+        // an empty body. It is a bad request, and the caller can act on it.
+        ctx.Response.StatusCode = StatusCodes.Status400BadRequest;
+        await ctx.Response.WriteAsJsonAsync(new { error = ex.Message });
+    }
+    catch (UnauthorizedAccessException ex)
+    {
+        ctx.Response.StatusCode = StatusCodes.Status403Forbidden;
+        await ctx.Response.WriteAsJsonAsync(new { error = ex.Message });
+    }
     catch (ArgumentException ex)
     {
         ctx.Response.StatusCode = StatusCodes.Status400BadRequest;
@@ -140,15 +152,24 @@ app.MapGet("/session/status", (AnalysisSession s) => Results.Ok(s.Status()));
 app.MapPost("/session/load", (AnalysisSession s, Contracts.ExportRequest req) =>
     Results.Ok(s.LoadGeoTiff(req.Path)));
 app.MapPost("/session/generate", (AnalysisSession s, Contracts.GenerateArchiveRequest req) =>
-    Results.Ok(s.GenerateArchiveAt(req.Latitude, req.Longitude)));
+{
+    req.Validate();
+    return Results.Ok(s.GenerateArchiveAt(req.Latitude, req.Longitude));
+});
 app.MapPost("/benchmark", (AnalysisSession s, Contracts.BenchmarkRequest req) =>
     Results.Ok(new { outputDirectory = s.RunBenchmark(req.OutputDirectory) }));
 
 // ---- search (returns Results - see CONTEXT.md) ----
 app.MapPost("/search/text", (AnalysisSession s, Contracts.TextSearchRequest req) =>
-    Results.Ok(s.SearchByText(req)));
+{
+    req.Validate();
+    return Results.Ok(s.SearchByText(req));
+});
 app.MapPost("/search/similar", (AnalysisSession s, Contracts.SimilarSearchRequest req) =>
-    Results.Ok(s.SearchSimilar(req)));
+{
+    req.Validate();
+    return Results.Ok(s.SearchSimilar(req));
+});
 app.MapPost("/search/feedback", (AnalysisSession s, Contracts.FeedbackSearchRequest req) =>
     Results.Ok(s.SearchWithFeedback(req)));
 app.MapGet("/search/explain", (string q) =>
@@ -159,7 +180,10 @@ app.MapPost("/change/detect", (AnalysisSession s, Contracts.DetectRequest req) =
     Results.Ok(s.DetectChanges(req)));
 app.MapGet("/change/candidates", (AnalysisSession s) => Results.Ok(s.Candidates()));
 app.MapPost("/change/search", (AnalysisSession s, Contracts.ChangeSearchRequest req) =>
-    Results.Ok(s.SearchChanges(req)));
+{
+    req.Validate();
+    return Results.Ok(s.SearchChanges(req));
+});
 
 // ---- clustering ----
 app.MapPost("/cluster", (AnalysisSession s, Contracts.ClusterRequest req) =>

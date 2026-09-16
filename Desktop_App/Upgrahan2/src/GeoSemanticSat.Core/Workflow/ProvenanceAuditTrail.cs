@@ -89,6 +89,9 @@ public static class ProvenanceAuditTrail
     public static void SaveGeoJson(string filePath, IEnumerable<ChangeRecord> changes)
     {
         string json = ExportToGeoJson(changes);
-        File.WriteAllText(filePath, json, Encoding.UTF8);
+        // new UTF8Encoding(false), not Encoding.UTF8: the latter emits a byte-order mark,
+        // and RFC 8259 says a JSON implementation must not add one. With the BOM present the
+        // ordinary open(path) + json.loads fails on the very first character.
+        File.WriteAllText(filePath, json, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
     }
 }
