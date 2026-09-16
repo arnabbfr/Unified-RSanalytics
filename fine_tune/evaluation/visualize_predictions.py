@@ -86,18 +86,24 @@ def create_confusion_overlay(
 
 
 def generate_visualizations(
-    config_path: str | Path,
+    config_path: str | Path | Any,
     checkpoint_path: str | Path | None = None,
     split: str = "valid",
     num_samples: int = 5,
     output_dir: str | Path | None = None,
+    data_root: str | None = None,
 ) -> None:
     """Generate and save 4-panel visual comparison cards for a set of evaluation samples."""
     if not MATPLOTLIB_AVAILABLE:
         print("[Visualization Warning] 'matplotlib' is not available. Skipping image rendering.")
         return
 
-    config = load_config(config_path)
+    if hasattr(config_path, "model") and hasattr(config_path, "data"):
+        config = config_path
+    else:
+        overrides = {"data.root": data_root} if data_root else {}
+        config = load_config(config_path, overrides=overrides)
+
     device = get_device("auto")
 
     # Resolve Checkpoint

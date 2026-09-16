@@ -22,13 +22,19 @@ from fine_tune.utils.device import get_device, log_device_info
 
 
 def evaluate_checkpoint(
-    config_path: str | Path,
+    config_path: str | Path | Any,
     checkpoint_path: str | Path | None = None,
     split: str = "valid",
     output_json: str | Path | None = None,
+    data_root: str | None = None,
 ) -> dict:
     """Evaluate a trained model checkpoint against validation or test datasets."""
-    config = load_config(config_path)
+    if hasattr(config_path, "model") and hasattr(config_path, "data"):
+        config = config_path
+    else:
+        overrides = {"data.root": data_root} if data_root else {}
+        config = load_config(config_path, overrides=overrides)
+
     device = get_device("auto")
     log_device_info(device)
 

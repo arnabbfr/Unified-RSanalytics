@@ -98,7 +98,7 @@ def run_experiment(
         print("RUNNING FINAL BENCHMARK EVALUATION")
         print("=" * 70)
         eval_split = "test" if test_loader is not None and len(test_loader) > 0 else "valid"
-        evaluate_checkpoint(config_path=cfg_file, checkpoint_path=ckpt_path, split=eval_split)
+        evaluate_checkpoint(config_path=config, checkpoint_path=ckpt_path, split=eval_split)
 
         # 7. Visualization
         if visualize:
@@ -106,7 +106,7 @@ def run_experiment(
             print("GENERATING PREDICTION VISUALIZATION CARDS")
             print("=" * 70)
             generate_visualizations(
-                config_path=cfg_file,
+                config_path=config,
                 checkpoint_path=ckpt_path,
                 split=eval_split,
                 num_samples=4,

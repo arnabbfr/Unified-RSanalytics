@@ -208,3 +208,8 @@ def build_loss_fn(loss_cfg: Dict[str, Any] | Any) -> nn.Module:
         return CompoundFloodLoss(pos_weight=pos_weight_val, ignore_index=ignore_index)
 
 
+# Backward-compatible aliases
+MaskedDiceLoss = GlobalBatchDiceLoss
+CombinedBceDiceLoss = CompoundFloodLoss
+
+

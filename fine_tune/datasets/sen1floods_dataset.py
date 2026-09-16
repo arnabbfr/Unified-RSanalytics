@@ -262,7 +262,7 @@ class Sen1FloodsDataset(Dataset):
 
         # Apply train / val / test hash split
         self._all_discovered_samples = matched_pairs
-        self._apply_hash_split()
+        self.samples = self._apply_hash_split(matched_pairs)
 
         # Guarantee at least some samples if hash split had zero matches
         if len(self.samples) == 0 and len(matched_pairs) > 0:
@@ -317,10 +317,10 @@ class Sen1FloodsDataset(Dataset):
             if msk_path.is_file():
                 self.samples.append((img_path, msk_path))
 
-    def _apply_hash_split(self) -> None:
+    def _apply_hash_split(self, pairs: List[Tuple[Path, Path]]) -> List[Tuple[Path, Path]]:
         """Deterministic split (70% train, 15% val, 15% test) based on sample hash."""
         filtered = []
-        for img_p, msk_p in self.samples:
+        for img_p, msk_p in pairs:
             h = abs(hash(img_p.name)) % 100
             if self.split == "train" and h < 70:
                 filtered.append((img_p, msk_p))
@@ -328,7 +328,7 @@ class Sen1FloodsDataset(Dataset):
                 filtered.append((img_p, msk_p))
             elif self.split == "test" and h >= 85:
                 filtered.append((img_p, msk_p))
-        self.samples = filtered
+        return filtered
 
     def __len__(self) -> int:
         return len(self.samples)
