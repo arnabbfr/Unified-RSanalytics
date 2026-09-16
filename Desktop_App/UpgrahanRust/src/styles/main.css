@@ -104,6 +104,20 @@
     border-color: var(--ed-line);
   }
 
+  /*
+   * Native controls - <select> popups, date pickers, number spinners, scrollbars - are
+   * drawn by the OS, not the page, so no CSS of ours reaches inside them. Without this
+   * the WebView renders them light-on-light and the <select> options read as disabled.
+   * color-scheme is the only lever that theme, so it belongs at the root, once.
+   */
+  :root {
+    color-scheme: dark;
+  }
+
+  :root:not(.dark) {
+    color-scheme: light;
+  }
+
   html,
   body,
   #root {

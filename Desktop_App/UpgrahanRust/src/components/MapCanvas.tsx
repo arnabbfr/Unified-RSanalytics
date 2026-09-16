@@ -12,7 +12,7 @@ import IconPlus from "~icons/lucide/plus";
 import IconMinus from "~icons/lucide/minus";
 import IconMaximize2 from "~icons/lucide/maximize-2";
 import { Button } from "~/components/Button";
-import { Select } from "~/components/ui";
+import { Select } from "~/components/Select";
 import { cn } from "~/lib/cn";
 import type { Bbox, ChangeType, Coord } from "~/lib/daemon";
 
@@ -349,17 +349,14 @@ export function MapCanvas(props: MapCanvasProps) {
         <Select
           class="w-44"
           value={providerId()}
-          onChange={(e) => setProviderId(e.currentTarget.value)}
-        >
-          <For each={providers()}>
-            {(p) => (
-              <option value={p.id}>
-                {p.label}
-                {p.regionLimited ? " (limited coverage)" : ""}
-              </option>
-            )}
-          </For>
-        </Select>
+          title="Basemap provider"
+          options={providers().map((p) => ({
+            value: p.id,
+            label: p.label,
+            hint: p.regionLimited ? "Limited coverage" : undefined,
+          }))}
+          onChange={setProviderId}
+        />
         <Button
           variant={offlineOnly() ? "blue" : "gray"}
           size="sm"

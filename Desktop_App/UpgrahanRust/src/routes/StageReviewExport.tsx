@@ -83,6 +83,9 @@ export function StageReviewExport() {
     return c;
   });
 
+  /** Verdicts recorded so far. Rocchio needs at least one to have anything to learn from. */
+  const decided = createMemo(() => counts().Confirmed + counts().Rejected);
+
   // Stable sort: Pending items surface first, everything else keeps its existing order.
   const sortedReview = createMemo(() =>
     [...state.review].sort((a, b) => Number(b.status === "Pending") - Number(a.status === "Pending")),
@@ -134,6 +137,25 @@ export function StageReviewExport() {
           <Button variant="ghost" size="sm" disabled={refreshing()} onClick={() => void handleRefresh()}>
             <IconLoaderCircle class={cn("size-3.5", refreshing() && "animate-spin")} />
             Refresh
+          </Button>
+
+          {/*
+            Rocchio relevance feedback. Disabled until at least one verdict exists, because
+            with no confirmed or rejected examples the adjusted query equals the original and
+            the button would appear to do nothing.
+          */}
+          <Button
+            variant="gray"
+            size="sm"
+            disabled={decided() === 0 || state.searching}
+            title={
+              decided() === 0
+                ? "Confirm or reject at least one candidate first"
+                : "Re-rank stage 1 Results using your verdicts (Rocchio relevance feedback)"
+            }
+            onClick={() => void actions.rerank()}
+          >
+            Re-rank from my verdicts
           </Button>
         </div>
         <p class="text-[11px] text-ed-text-3">

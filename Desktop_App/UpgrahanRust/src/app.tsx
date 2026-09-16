@@ -1,13 +1,16 @@
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { invoke } from "@tauri-apps/api/core";
-import { For, Match, Show, Switch, createSignal, onMount, type JSX } from "solid-js";
-import { Toaster } from "solid-toast";
+import { open } from "@tauri-apps/plugin-dialog";
+import { For, Match, Show, Switch, createSignal, onCleanup, onMount, type JSX } from "solid-js";
+import toast, { Toaster } from "solid-toast";
 import IconX from "~icons/lucide/x";
 import IconMinus from "~icons/lucide/minus";
 import IconSquare from "~icons/lucide/square";
 import IconRepeat from "~icons/lucide/repeat-2";
 import IconSatellite from "~icons/lucide/satellite";
 import IconCheck from "~icons/lucide/check";
+import IconImport from "~icons/lucide/import";
+import IconCircleHelp from "~icons/lucide/circle-help";
 
 import { Button } from "~/components/Button";
 import { ErrorNote } from "~/components/ui";
@@ -24,8 +27,30 @@ import { StageReviewExport } from "~/routes/StageReviewExport";
  * drawn titlebar (`data-tauri-drag-region`), hairline-divided from the body.
  */
 function Titlebar() {
-  const [state] = useApp();
+  const [state, actions] = useApp();
   const [canSwitch, setCanSwitch] = createSignal(false);
+
+  const pickGeoTiff = () =>
+    pickGeoTiffWith((path) => actions.loadGeoTiff(path)).catch((e) =>
+      toast.error(e instanceof Error ? e.message : String(e)),
+    );
+
+  const showShortcuts = () =>
+    toast(
+      () => (
+        <div class="flex flex-col gap-1">
+          <p class="text-[12px] font-medium text-ed-text-1">Keyboard shortcuts</p>
+          <For each={SHORTCUTS}>
+            {([key, what]) => (
+              <p class="text-[11px] text-ed-text-2">
+                <span class="font-mono text-ed-text-1">{key}</span> — {what}
+              </p>
+            )}
+          </For>
+        </div>
+      ),
+      { duration: 8000 },
+    );
 
   onMount(async () => {
     try {
@@ -68,6 +93,20 @@ function Titlebar() {
       </div>
 
       <div class="flex items-center gap-1">
+        <Button variant="ghost" size="sm" title="Load a GeoTIFF into the archive (Ctrl+O)" onClick={pickGeoTiff}>
+          <IconImport class="size-3.5" />
+          Load GeoTIFF
+        </Button>
+
+        <Button
+          variant="ghost"
+          size="icon"
+          title="Keyboard shortcuts (F1)"
+          onClick={() => showShortcuts()}
+        >
+          <IconCircleHelp class="size-3.5" />
+        </Button>
+
         {/* Only offered in the combined bundle where both builds sit side by side. */}
         <Show when={canSwitch()}>
           <Button
@@ -96,6 +135,25 @@ function Titlebar() {
     </header>
   );
 }
+
+/** Opens the file picker and ingests the chosen scene. Shared by the button and Ctrl+O. */
+async function pickGeoTiffWith(load: (path: string) => Promise<void>) {
+  const chosen = await open({
+    multiple: false,
+    filters: [{ name: "GeoTIFF", extensions: ["tif", "tiff"] }],
+  });
+  if (typeof chosen === "string") await load(chosen);
+}
+
+const SHORTCUTS = [
+  ["Ctrl+1 … Ctrl+5", "Jump to a stage"],
+  ["Ctrl+O", "Load a GeoTIFF"],
+  ["Ctrl+F", "Focus the search box"],
+  ["F1", "This list"],
+  ["F5", "Re-run the current search"],
+  ["C / R / N", "Confirm, reject, next candidate (stage 3)"],
+  ["Esc", "Dismiss"],
+] as const;
 
 function WindowButton(props: {
   label: string;
@@ -186,13 +244,62 @@ function Shell() {
   onMount(() => {
     void actions.boot();
 
-    window.addEventListener("keydown", (e) => {
-      if (!e.ctrlKey || e.repeat) return;
-      const n = Number(e.key);
-      if (n >= 1 && n <= 5 && actions.canEnter(n as StageId)) {
-        e.preventDefault();
-        actions.setStage(n as StageId);
+    // Keyboard parity with the Avalonia app. Stage-3 verdict keys (C/R/N) are owned by that
+    // screen, which knows the selected candidate, so they are deliberately not handled here.
+    const onKey = (e: KeyboardEvent) => {
+      if (e.repeat) return;
+
+      const target = e.target as HTMLElement | null;
+      const typing = target?.tagName === "INPUT" || target?.tagName === "TEXTAREA";
+
+      if (e.ctrlKey) {
+        const n = Number(e.key);
+        if (n >= 1 && n <= 5 && actions.canEnter(n as StageId)) {
+          e.preventDefault();
+          actions.setStage(n as StageId);
+          return;
+        }
+        if (e.key === "o" || e.key === "O") {
+          e.preventDefault();
+          void pickGeoTiffWith((path) => actions.loadGeoTiff(path)).catch((err) =>
+            toast.error(err instanceof Error ? err.message : String(err)),
+          );
+          return;
+        }
+        if (e.key === "f" || e.key === "F") {
+          e.preventDefault();
+          document.querySelector<HTMLInputElement>('input[data-search-input]')?.focus();
+          return;
+        }
       }
+
+      if (e.key === "F5" && !typing) {
+        e.preventDefault();
+        void actions.search(state.query);
+        return;
+      }
+
+      if (e.key === "Escape") {
+        (document.activeElement as HTMLElement | null)?.blur();
+        actions.clearError();
+      }
+    };
+
+    // Tauri delivers OS file drops as a window event, not an HTML drag event.
+    const unlistenDrop = getCurrentWindow().onDragDropEvent((event) => {
+      if (event.payload.type !== "drop") return;
+      const scene = event.payload.paths.find((p) => /\.tiff?$/i.test(p));
+      if (!scene) {
+        toast.error("Only .tif and .tiff scenes can be loaded.");
+        return;
+      }
+      void actions.loadGeoTiff(scene);
+    });
+
+    window.addEventListener("keydown", onKey);
+    onCleanup(() => {
+      window.removeEventListener("keydown", onKey);
+      void unlistenDrop.then((off) => off());
     });
   });
 
@@ -236,7 +343,43 @@ function Shell() {
           </Match>
         </Switch>
       </main>
+
+      <StatusBar />
     </div>
+  );
+}
+
+/** Bottom strip, mirroring the Avalonia app's telemetry row. */
+function StatusBar() {
+  const [state] = useApp();
+
+  const stage = () => STAGES.find((s) => s.id === state.stage);
+  const sensors = () =>
+    Array.from(new Set((state.session?.tiles ?? []).map((t) => t.platform))).join(", ") || "none";
+
+  return (
+    <footer class="flex h-7 shrink-0 items-center gap-4 border-t border-ed-line bg-ed-card px-3 text-[11px] text-ed-text-3">
+      <span>{state.session?.indexedPatches ?? 0} indexed</span>
+      <span class="text-ed-line-strong">·</span>
+      <span>
+        {state.candidates.length === 0
+          ? "no candidates"
+          : `${state.candidates.length} candidates (${state.candidates.filter((c) => c.confidence >= 0.85).length} strong)`}
+      </span>
+      <span class="text-ed-line-strong">·</span>
+      <span>{state.review.filter((i) => i.status !== "Pending").length} reviewed</span>
+
+      <div class="flex-1" />
+
+      <span class="truncate">{sensors()}</span>
+      <span class="text-ed-line-strong">·</span>
+      <span class="text-ed-text-2">
+        Stage {state.stage} — {stage()?.name}
+      </span>
+      <Show when={state.searching || state.detecting || state.clustering}>
+        <span class="size-2 animate-pulse rounded-full bg-ed-accent" title="Working" />
+      </Show>
+    </footer>
   );
 }
 

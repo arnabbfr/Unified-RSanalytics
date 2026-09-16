@@ -47,3 +47,6 @@ Desktop_App/UpgrahanRust/src-tauri/gen/
 
 # Tauri frontend build output
 Desktop_App/UpgrahanRust/dist/
+
+# Reticle local state
+.reticle/

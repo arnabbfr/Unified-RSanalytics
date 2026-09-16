@@ -1,5 +1,6 @@
 import { createMemo, createSignal, For, Show } from "solid-js";
 import { Button } from "~/components/Button";
+import { Select } from "~/components/Select";
 import { MapCanvas } from "~/components/MapCanvas";
 import {
   ChangeTypeChip,
@@ -10,7 +11,6 @@ import {
   formatArea,
   formatDate,
   Input,
-  Select,
 } from "~/components/ui";
 import { api, type ChangeSearchResult, type ChangeType } from "~/lib/daemon";
 import { useApp } from "~/lib/store";
@@ -128,13 +128,12 @@ export function StagePickLocation() {
           <Field label="Change type">
             <Select
               value={changeType()}
-              onChange={(e) => setChangeType(e.currentTarget.value as ChangeType | "")}
-            >
-              <option value="">All</option>
-              <For each={CHANGE_TYPES}>
-                {(t) => <option value={t}>{CHANGE_TYPE_LABELS[t]}</option>}
-              </For>
-            </Select>
+              options={[
+                { value: "" as const, label: "All" },
+                ...CHANGE_TYPES.map((t) => ({ value: t, label: CHANGE_TYPE_LABELS[t] })),
+              ]}
+              onChange={(v) => setChangeType(v as ChangeType | "")}
+            />
           </Field>
 
           <div class="grid grid-cols-2 gap-2">

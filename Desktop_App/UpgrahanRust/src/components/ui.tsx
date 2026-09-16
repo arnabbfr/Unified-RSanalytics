@@ -181,21 +181,6 @@ export function Input(props: ComponentProps<"input">) {
   );
 }
 
-export function Select(props: ComponentProps<"select">) {
-  const [local, rest] = splitProps(props, ["class"]);
-  return (
-    <select
-      class={cn(
-        "h-8 rounded-lg border border-ed-line bg-ed-ctl px-2 text-[13px] text-ed-text-1",
-        "outline-none transition-colors duration-200 hover:bg-ed-ctl-hover",
-        "focus-visible:border-ed-accent focus-visible:ring-2 focus-visible:ring-ed-accent/30",
-        local.class,
-      )}
-      {...rest}
-    />
-  );
-}
-
 /** Skeletons mirror the real layout, as Cap's do, so loading never shifts the page. */
 export function Skeleton(props: { class?: string }) {
   return <div class={cn("animate-pulse rounded-md bg-ed-ctl-active", props.class)} />;

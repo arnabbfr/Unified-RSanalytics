@@ -2,13 +2,13 @@ import { createResource, createSignal, For, Show } from "solid-js";
 import IconSearch from "~icons/lucide/search";
 import IconSparkles from "~icons/lucide/sparkles";
 import { Button } from "~/components/Button";
+import { Select } from "~/components/Select";
 import {
   Badge,
   Card,
   EmptyState,
   formatCoord,
   formatDate,
-  Select,
   Skeleton,
   SkeletonRows,
   SimilarityScore,
@@ -29,6 +29,20 @@ const RENDER_MODE_LABELS: Record<VisualRenderMode, string> = {
 };
 
 const RENDER_MODES = Object.keys(RENDER_MODE_LABELS) as VisualRenderMode[];
+
+const SENSORS = [
+  "Sentinel2_Optical",
+  "Sentinel1_SAR",
+  "Landsat8_9",
+  "ISRO_Bhuvan",
+] as const;
+
+const SENSOR_LABELS: Record<(typeof SENSORS)[number], string> = {
+  Sentinel2_Optical: "Sentinel-2 (optical)",
+  Sentinel1_SAR: "Sentinel-1 (radar)",
+  Landsat8_9: "Landsat 8/9",
+  ISRO_Bhuvan: "ISRO Bhuvan",
+};
 
 const PRESET_QUERIES = [
   "structures near a river",
@@ -116,7 +130,28 @@ export function StageFindImages() {
 
   // Results at or below zero similarity are not Results at all (CONTEXT.md) - filter here
   // so the list itself can never show one, regardless of what the daemon returns.
-  const visibleResults = () => state.results.filter((r) => r.similarityScore > 0);
+  // Sensor and order are applied client-side: both are properties of Results already in
+  // hand, so re-querying the daemon for them would be a round trip for nothing.
+  const visibleResults = () => {
+    const kept = state.results.filter(
+      (r) =>
+        r.similarityScore > 0 &&
+        (state.sensorFilter === "All" || r.patch.platform === state.sensorFilter),
+    );
+
+    const time = (iso: string) => new Date(iso).getTime();
+
+    switch (state.sortOrder) {
+      case "newest":
+        return [...kept].sort((a, b) => time(b.patch.timestamp) - time(a.patch.timestamp));
+      case "oldest":
+        return [...kept].sort((a, b) => time(a.patch.timestamp) - time(b.patch.timestamp));
+      case "quality":
+        return [...kept].sort((a, b) => b.patch.qualityScore - a.patch.qualityScore);
+      default:
+        return kept; // the daemon already returns these ranked by similarity
+    }
+  };
 
   return (
     <div class="flex h-full min-h-0 flex-col">
@@ -125,6 +160,7 @@ export function StageFindImages() {
           <div class="relative flex-1">
             <IconSearch class="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-ed-text-3" />
             <input
+              data-search-input
               value={draft()}
               onInput={(e) => setDraft(e.currentTarget.value)}
               onKeyDown={(e) => e.key === "Enter" && runSearch(draft())}
@@ -137,12 +173,38 @@ export function StageFindImages() {
           </Button>
           <Select
             value={state.renderMode}
-            onChange={(e) => actions.setRenderMode(e.currentTarget.value as VisualRenderMode)}
-          >
-            <For each={RENDER_MODES}>
-              {(mode) => <option value={mode}>{RENDER_MODE_LABELS[mode]}</option>}
-            </For>
-          </Select>
+            title="How the imagery is rendered"
+            options={RENDER_MODES.map((m) => ({ value: m, label: RENDER_MODE_LABELS[m] }))}
+            onChange={actions.setRenderMode}
+          />
+        </div>
+
+        <div class="mt-2 flex items-center gap-2">
+          <Select
+            value={state.sensorFilter}
+            title="Show only Results from one sensor"
+            options={[
+              { value: "All" as const, label: "All sensors" },
+              ...SENSORS.map((x) => ({ value: x, label: SENSOR_LABELS[x] })),
+            ]}
+            onChange={actions.setSensorFilter}
+          />
+
+          <Select
+            value={state.sortOrder}
+            title="Order the Results"
+            options={[
+              { value: "similarity" as const, label: "Best match first" },
+              { value: "newest" as const, label: "Newest first" },
+              { value: "oldest" as const, label: "Oldest first" },
+              { value: "quality" as const, label: "Best image quality first" },
+            ]}
+            onChange={actions.setSortOrder}
+          />
+
+          <span class="text-[11px] text-ed-text-3">
+            {visibleResults().length} shown
+          </span>
         </div>
 
         <Show when={state.explanation}>

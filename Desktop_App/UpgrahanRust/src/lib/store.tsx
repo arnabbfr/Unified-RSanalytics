@@ -3,6 +3,7 @@ import { createStore } from "solid-js/store";
 import {
   api,
   type ChangeRecord,
+  type SensorPlatform,
   type Cluster,
   type ReviewItem,
   type SearchResult,
@@ -41,6 +42,8 @@ interface AppState {
   explanation: string;
   results: SearchResult[];
   renderMode: VisualRenderMode;
+  sensorFilter: SensorPlatform | "All";
+  sortOrder: "similarity" | "newest" | "oldest" | "quality";
   searching: boolean;
 
   // Stage 2 / 3
@@ -68,6 +71,8 @@ const initial: AppState = {
   explanation: "",
   results: [],
   renderMode: "TrueColorRGB",
+  sensorFilter: "All",
+  sortOrder: "similarity",
   searching: false,
   candidates: [],
   selectedCandidateId: null,
@@ -194,7 +199,49 @@ function createAppStore() {
       }
     },
 
+    /** Ingests a GeoTIFF from disk and re-runs the current query over the new index. */
+    async loadGeoTiff(path: string) {
+      setState({ searching: true, error: null });
+      try {
+        await api.loadGeoTiff(path);
+        setState("session", await api.status());
+        await actions.search(state.query);
+      } catch (e) {
+        setState("searching", false);
+        fail(e);
+      }
+    },
+
+    /** Rocchio relevance feedback: re-ranks using the analyst's confirmed/rejected verdicts. */
+    async rerank() {
+      const verified = state.review.filter((i) => i.status === "Confirmed");
+      const rejected = state.review.filter((i) => i.status === "Rejected");
+      if (verified.length === 0 && rejected.length === 0) return;
+
+      setState({ searching: true, error: null });
+      try {
+        // Feedback is keyed on patches, and a verdict is recorded against a Candidate, so
+        // the tile the Candidate sits on is what carries the signal back into the query.
+        const patchIdsFor = (ids: string[]) =>
+          state.results.filter((r) => ids.includes(r.patch.parentTileId)).map((r) => r.patch.patchId);
+
+        setState({
+          results: await api.searchFeedback(
+            state.query,
+            patchIdsFor(verified.map((i) => i.record.tileId)),
+            patchIdsFor(rejected.map((i) => i.record.tileId)),
+          ),
+          searching: false,
+        });
+      } catch (e) {
+        setState("searching", false);
+        fail(e);
+      }
+    },
+
     setStage: (stage: StageId) => setState("stage", stage),
+    setSensorFilter: (sensorFilter: AppState["sensorFilter"]) => setState("sensorFilter", sensorFilter),
+    setSortOrder: (sortOrder: AppState["sortOrder"]) => setState("sortOrder", sortOrder),
     select: (id: string | null) => setState("selectedCandidateId", id),
     setRenderMode: (renderMode: VisualRenderMode) => setState("renderMode", renderMode),
     setQuery: (query: string) => setState("query", query),
