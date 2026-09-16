@@ -178,6 +178,19 @@ interface Endpoint {
 
 let endpoint: Endpoint | null = null;
 
+const messageOf = (e: unknown) => (e instanceof Error ? e.message : String(e));
+
+/**
+ * Called after the client has had to start a replacement daemon and re-seed its session.
+ * The app sets this so it can reload what it is showing and tell the analyst, since any
+ * verdicts recorded against the previous process are gone.
+ */
+let onDaemonRestarted: (() => void) | undefined;
+
+export function setDaemonRestartHandler(handler: () => void) {
+  onDaemonRestarted = handler;
+}
+
 /** Starts the daemon (idempotent) and caches where to reach it. */
 export async function connect(): Promise<Endpoint> {
   if (endpoint) return endpoint;
@@ -197,10 +210,14 @@ export async function connect(): Promise<Endpoint> {
   return endpoint;
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+/**
+ * One attempt against the current endpoint. Separated from `request` so a transport
+ * failure can be retried against a freshly started daemon.
+ */
+async function attempt(path: string, init?: RequestInit): Promise<Response> {
   const ep = await connect();
 
-  const response = await fetch(`${ep.baseUrl}${path}`, {
+  return fetch(`${ep.baseUrl}${path}`, {
     ...init,
     headers: {
       "X-GSS-Token": ep.token,
@@ -208,6 +225,34 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       ...init?.headers,
     },
   });
+}
+
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  let response: Response;
+
+  try {
+    response = await attempt(path, init);
+  } catch {
+    // fetch rejects (rather than returning a status) when nothing answered at all -
+    // the daemon exited, so the cached endpoint points at a closed port. Drop it and
+    // try once more; start_daemon notices the child is gone and starts a new one.
+    endpoint = null;
+
+    try {
+      // A replacement daemon is a FRESH session: no archive, no candidates, no review
+      // queue. Reconnecting alone leaves every call succeeding against an empty index,
+      // which reads as "nothing matched" rather than "the engine restarted". Re-seed it
+      // before retrying, and let the app know so it can refresh what it is showing.
+      await attempt("/session/init", { method: "POST" });
+      onDaemonRestarted?.();
+
+      response = await attempt(path, init);
+    } catch (e) {
+      throw new Error(
+        `The analysis engine stopped and could not be restarted. ${messageOf(e)}`,
+      );
+    }
+  }
 
   if (!response.ok) {
     // The daemon returns {"error": "..."} for the cases it maps deliberately.

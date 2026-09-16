@@ -1,5 +1,7 @@
 import { createContext, useContext, type ParentProps } from "solid-js";
 import { createStore } from "solid-js/store";
+import { setDaemonRestartHandler } from "~/lib/daemon";
+import { notify } from "~/lib/notify";
 import {
   api,
   type ChangeRecord,
@@ -94,6 +96,19 @@ function createAppStore() {
   const fail = (e: unknown) => setState("error", e instanceof Error ? e.message : String(e));
 
   const actions = {
+    /**
+     * The client had to start a replacement daemon. Its session is freshly seeded, so what
+     * the app is holding - candidates, clusters, verdicts - belongs to a process that no
+     * longer exists. Reload, and say so rather than silently showing different data.
+     */
+    async handleDaemonRestart() {
+      notify.error(
+        "The analysis engine restarted, so the session was rebuilt. Any verdicts recorded before this are gone.",
+        { id: "daemon-restart", duration: 10000 },
+      );
+      await actions.boot();
+    },
+
     async boot() {
       setState({ connecting: true, error: null });
       try {

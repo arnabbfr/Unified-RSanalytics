@@ -8,16 +8,46 @@
 //! (`{"ready":true,"port":N,"token":"..."}`) to stdout. We block on that line rather than
 //! polling a fixed port, which avoids both a firewall prompt and a port collision.
 
-use std::io::{BufRead, BufReader};
+use std::collections::VecDeque;
+use std::io::{BufRead, BufReader, Read};
 use std::path::PathBuf;
-use std::process::{Child, Command, Stdio};
-use std::sync::Mutex;
+use std::process::{Child, ChildStderr, Command, Stdio};
+use std::sync::{Arc, Mutex};
+use std::thread;
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 
 /// How long to wait for the handshake line before giving up.
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// Lines of child stderr kept so a death can be explained rather than just observed.
+const STDERR_TAIL_LINES: usize = 40;
+
+/// Drains a child pipe for the life of the process, keeping the most recent lines.
+///
+/// Both halves of this matter. If nobody reads, the OS pipe buffer fills and the child
+/// blocks forever on its next write - it looks like a hang with no cause. And if the read
+/// end is dropped instead, the pipe closes and the child's next write fails, which on .NET
+/// can surface as an unhandled IOException and kill it outright with nothing logged. That
+/// is what made the daemon die silently: the handshake reader was a local, so the stdout
+/// pipe closed the moment startup finished.
+fn drain<R: Read + Send + 'static>(stream: R, tail: Option<Arc<Mutex<VecDeque<String>>>>) {
+    thread::spawn(move || {
+        let reader = BufReader::new(stream);
+        for line in reader.lines() {
+            let Ok(line) = line else { break };
+            if let Some(tail) = &tail {
+                if let Ok(mut buffer) = tail.lock() {
+                    if buffer.len() == STDERR_TAIL_LINES {
+                        buffer.pop_front();
+                    }
+                    buffer.push_back(line);
+                }
+            }
+        }
+    });
+}
 
 #[derive(Debug, Deserialize)]
 struct Handshake {
@@ -40,6 +70,7 @@ pub struct DaemonEndpoint {
 pub struct DaemonState {
     pub endpoint: Mutex<Option<DaemonEndpoint>>,
     child: Mutex<Option<Child>>,
+    stderr_tail: Arc<Mutex<VecDeque<String>>>,
 }
 
 impl DaemonState {
@@ -47,6 +78,26 @@ impl DaemonState {
         Self {
             endpoint: Mutex::new(None),
             child: Mutex::new(None),
+            stderr_tail: Arc::new(Mutex::new(VecDeque::new())),
+        }
+    }
+
+    /// The last thing the daemon said before it stopped, for error messages.
+    pub fn last_output(&self) -> String {
+        self.stderr_tail
+            .lock()
+            .map(|t| t.iter().cloned().collect::<Vec<_>>().join("
+"))
+            .unwrap_or_default()
+    }
+
+    /// True when a daemon was started and is still running.
+    pub fn is_running(&self) -> bool {
+        let Ok(mut guard) = self.child.lock() else { return false };
+        match guard.as_mut() {
+            // try_wait returns Ok(None) while the child is still alive.
+            Some(child) => matches!(child.try_wait(), Ok(None)),
+            None => false,
         }
     }
 
@@ -110,11 +161,18 @@ fn locate_daemon() -> Result<PathBuf, String> {
 
 /// Spawns the daemon and blocks until it reports a port and token.
 pub fn start(state: &DaemonState) -> Result<DaemonEndpoint, String> {
-    // Already running - hand back the existing endpoint rather than spawning a second one.
-    if let Ok(guard) = state.endpoint.lock() {
-        if let Some(endpoint) = guard.clone() {
-            return Ok(endpoint);
+    // Reuse the running daemon, but only if it is actually alive. Returning a cached
+    // endpoint for a dead child is what turned a crash into "Failed to fetch" on every
+    // later call, with no way back short of restarting the app.
+    if state.is_running() {
+        if let Ok(guard) = state.endpoint.lock() {
+            if let Some(endpoint) = guard.clone() {
+                return Ok(endpoint);
+            }
         }
+    } else if let Ok(mut guard) = state.endpoint.lock() {
+        // Stale endpoint from a daemon that has since exited - drop it and start again.
+        *guard = None;
     }
 
     let exe = locate_daemon()?;
@@ -129,6 +187,12 @@ pub fn start(state: &DaemonState) -> Result<DaemonEndpoint, String> {
         .stdout
         .take()
         .ok_or_else(|| "The analysis daemon produced no stdout to read the handshake from.".to_string())?;
+
+    // Start draining stderr immediately, so a failure during startup is captured rather
+    // than lost, and so the child can never block writing to a pipe nobody reads.
+    if let Some(stderr) = child.stderr.take() {
+        drain::<ChildStderr>(stderr, Some(Arc::clone(&state.stderr_tail)));
+    }
 
     let started = Instant::now();
     let mut reader = BufReader::new(stdout);
@@ -145,7 +209,13 @@ pub fn start(state: &DaemonState) -> Result<DaemonEndpoint, String> {
             Ok(0) => {
                 // stdout closed before the handshake: the daemon died on startup.
                 let _ = child.kill();
-                return Err("The analysis daemon exited before it was ready.".into());
+                let said = state.last_output();
+                return Err(if said.is_empty() {
+                    "The analysis daemon exited before it was ready.".to_string()
+                } else {
+                    format!("The analysis daemon exited before it was ready:
+{said}")
+                });
             }
             Ok(_) => {
                 if let Ok(parsed) = serde_json::from_str::<Handshake>(line.trim()) {
@@ -164,6 +234,11 @@ pub fn start(state: &DaemonState) -> Result<DaemonEndpoint, String> {
         base_url: format!("http://127.0.0.1:{}", handshake.port),
         token: handshake.token,
     };
+
+    // Hand the reader to a drain thread rather than letting it drop here. Dropping it
+    // closes the read end, and the daemon's next write to stdout then fails - which is
+    // how it came to die silently mid-session.
+    drain(reader, None);
 
     if let Ok(mut guard) = state.child.lock() {
         *guard = Some(child);

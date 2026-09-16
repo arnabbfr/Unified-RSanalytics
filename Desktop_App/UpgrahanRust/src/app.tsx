@@ -18,7 +18,7 @@ import IconLoaderCircle from "~icons/lucide/loader-circle";
 
 import { Button } from "~/components/Button";
 import { ErrorNote } from "~/components/ui";
-import { api } from "~/lib/daemon";
+import { api, setDaemonRestartHandler } from "~/lib/daemon";
 import { cn } from "~/lib/cn";
 import { AppProvider, STAGES, useApp, type StageId } from "~/lib/store";
 import { StageFindImages } from "~/routes/StageFindImages";
@@ -318,6 +318,9 @@ function Shell() {
   const [state, actions] = useApp();
 
   onMount(() => {
+    // Register before booting, so a restart during the very first load is handled too.
+    setDaemonRestartHandler(() => void actions.handleDaemonRestart());
+
     void actions.boot();
 
     // Keyboard parity with the Avalonia app. Stage-3 verdict keys (C/R/N) are owned by that
