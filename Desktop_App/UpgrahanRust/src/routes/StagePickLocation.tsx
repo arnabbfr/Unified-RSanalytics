@@ -1,4 +1,4 @@
-import { createMemo, createResource, createSignal, For, onMount, Show } from "solid-js";
+import { createEffect, createMemo, createResource, createSignal, For, Show } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import toast from "solid-toast";
@@ -25,7 +25,13 @@ import {
   Metric,
   Skeleton,
 } from "~/components/ui";
-import { api, bmpDataUrl, type ChangeSearchResult, type ChangeType } from "~/lib/daemon";
+import {
+  api,
+  bmpDataUrl,
+  type ChangeSearchResult,
+  type ChangeType,
+  type Bbox,
+} from "~/lib/daemon";
 import { useApp } from "~/lib/store";
 
 const CHANGE_TYPE_LABELS: Record<Exclude<ChangeType, "NoChange">, string> = {
@@ -235,8 +241,9 @@ export function StagePickLocation() {
 
   // A location handed off from Stage 1 ("Target here") wins over the archive-centre default.
   // Captured once, synchronously, since this component remounts fresh every time Stage 2 opens.
+  // Seed from any pending target so the first paint already shows the right place;
+  // the createEffect below handles every subsequent "Target here".
   const pendingTarget = state.pendingTarget;
-  const hadPendingTarget = pendingTarget !== null;
 
   const firstTile = state.session?.tiles[0];
   const initial = pendingTarget
@@ -279,7 +286,10 @@ export function StagePickLocation() {
         topK: 50,
       };
       const type = changeType();
-      if (type) body.targetChangeType = type;
+      // "any" means no filter. It is a truthy string, so this has to compare against the
+      // sentinel rather than test truthiness - otherwise it reaches the daemon and
+      // Enum.Parse<ChangeType>("any") throws.
+      if (type !== "any") body.targetChangeType = type;
       if (startDate()) body.startDate = startDate();
       if (endDate()) body.endDate = endDate();
 
@@ -292,11 +302,30 @@ export function StagePickLocation() {
     }
   }
 
-  onMount(() => {
-    if (hadPendingTarget) {
-      actions.clearPendingTarget();
-      void search();
-    }
+  // React to pendingTarget rather than reading it once at creation. Reading it at creation
+  // only works if this screen is torn down between visits; if it stays mounted, a second
+  // "Target here" from stage 1 silently kept the first one's coordinates.
+  createEffect(() => {
+    const target = state.pendingTarget;
+    if (!target) return;
+
+    setLatitude(target.latitude);
+    setLongitude(target.longitude);
+
+    // Move the viewport too. Updating the coordinate fields alone left the map sitting
+    // wherever it was, so "Target here" appeared to do nothing when the target was
+    // off-screen. The box is a rough degree-padding around the point; fitBounds then
+    // picks a sensible zoom.
+    const pad = 0.01;
+    setFlyToBounds({
+      minLat: target.latitude - pad,
+      maxLat: target.latitude + pad,
+      minLon: target.longitude - pad,
+      maxLon: target.longitude + pad,
+    });
+
+    actions.clearPendingTarget();
+    void search();
   });
 
   function selectCandidate(r: ChangeSearchResult) {
@@ -313,9 +342,16 @@ export function StagePickLocation() {
     })),
   );
 
-  const flyToBounds = createMemo(() => {
+  /**
+   * Where the map should move next. A signal rather than a memo because two things drive
+   * it - selecting a candidate, and a "Target here" handoff from stage 1 - and whichever
+   * happened most recently should win. A memo over selection alone could not express that.
+   */
+  const [flyToBounds, setFlyToBounds] = createSignal<Bbox | undefined>();
+
+  createEffect(() => {
     const selected = candidates().find((r) => r.record.id === state.selectedCandidateId);
-    return selected?.record.bounds;
+    if (selected) setFlyToBounds(selected.record.bounds);
   });
 
   const selectedResult = createMemo(
@@ -734,10 +770,17 @@ export function StagePickLocation() {
           />
 
           <div class="absolute bottom-3 right-3 flex flex-col items-end gap-1.5">
+            {/*
+              Frosted glass: this control sits directly on satellite imagery, which can be any
+              brightness, so a translucent fill alone left the label unreadable over pale
+              ground. Blurring and desaturating what is behind it restores contrast while
+              keeping the see-through look.
+            */}
             <Button
               variant="gray"
               size="sm"
               disabled={caching()}
+              class="border-white/10 bg-ed-card/60 backdrop-blur-md backdrop-saturate-150 shadow-ed-pop hover:bg-ed-card/80"
               title="Downloads basemap tiles for this search area so the map keeps working offline."
               onClick={() => void precacheArea()}
             >
@@ -746,7 +789,7 @@ export function StagePickLocation() {
             </Button>
             <Show when={cacheProgress()}>
               {(p) => (
-                <p class="rounded-md bg-ed-card/90 px-2 py-1 text-[11px] text-ed-text-3 shadow-ed-pop">
+                <p class="rounded-md border border-white/10 bg-ed-card/60 px-2 py-1 text-[11px] text-ed-text-2 shadow-ed-pop backdrop-blur-md backdrop-saturate-150">
                   Cached {p().done} of {p().total} tiles
                 </p>
               )}
