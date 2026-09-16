@@ -12,7 +12,13 @@ services:
       # ponytail: SQLite lives in a named volume, not the ./data bind mount.
       # SQLite WAL locking is unreliable over Docker Desktop's Windows bind mounts.
       # Switch to the postgres profile if you ever need concurrent writers.
-      DATABASE_URL: ${DATABASE_URL:-sqlite:////app/dbdata/satintel.db}
+      #
+      # Deliberately NOT ${DATABASE_URL:-...}: compose interpolates that from the
+      # project .env, whose DATABASE_URL is the host-relative sqlite:///./data/...
+      # path used when running the API natively. That value won the interpolation
+      # and silently put the database on the bind mount. Override with
+      # API_DATABASE_URL (e.g. the postgres URL) if you need a different backend.
+      DATABASE_URL: ${API_DATABASE_URL:-sqlite:////app/dbdata/satintel.db}
       OFFLINE_MODE: "true"
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
     volumes:

@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>gss-daemon</AssemblyName>
+    <RootNamespace>GeoSemanticSat.Daemon</RootNamespace>
+    <!-- No launchSettings/appsettings: the port and token come from stdout, not config. -->
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\GeoSemanticSat.Core\GeoSemanticSat.Core.csproj" />
+    <ProjectReference Include="..\GeoSemanticSat.Engine\GeoSemanticSat.Engine.csproj" />
+  </ItemGroup>
+
+</Project>

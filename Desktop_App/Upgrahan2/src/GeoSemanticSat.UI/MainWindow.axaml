@@ -58,6 +58,16 @@
                 </StackPanel>
             </Button>
 
+            <!-- Offered only in the combined bundle, where the Tauri build sits beside this one. -->
+            <Button x:Name="BtnSwitchToTauri" Classes="flat" Click="OnSwitchToTauriClicked" Padding="9,4" MinHeight="28"
+                    IsVisible="False"
+                    ToolTip.Tip="Close this and reopen in the experimental Rust/Tauri build">
+                <StackPanel Orientation="Horizontal" Spacing="6">
+                    <lucide:Lucide Icon="{x:Static licon:LucideIconNames.Repeat2}" Width="14" Height="14" StrokeThickness="2" StrokeBrush="{DynamicResource TextMutedBrush}" VerticalAlignment="Center"/>
+                    <TextBlock x:Name="TxtSwitchToTauriLabel" Text="Rust UI" FontSize="{DynamicResource FontMicro}" VerticalAlignment="Center"/>
+                </StackPanel>
+            </Button>
+
             <Button x:Name="BtnHelpGuide" Classes="flat" Click="OnHelpGuideClicked" Padding="9,4" MinHeight="28"
                     ToolTip.Tip="Analyst documentation and keyboard shortcuts (F1)">
                 <StackPanel Orientation="Horizontal" Spacing="6">

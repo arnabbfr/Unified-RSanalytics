@@ -198,9 +198,272 @@ jobs:
           path: dist/artifacts/*
           if-no-files-found: error
 
+  build-tauri:
+    name: Build Rust/Tauri Frontend (${{ matrix.platform_name }})
+    needs: test
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            rid: win-x64
+            rust_target: x86_64-pc-windows-msvc
+            platform_name: Windows x64
+          - os: ubuntu-latest
+            rid: linux-x64
+            rust_target: x86_64-unknown-linux-gnu
+            platform_name: Linux x64
+          - os: macos-latest
+            rid: osx-arm64
+            rust_target: aarch64-apple-darwin
+            platform_name: macOS Apple Silicon (ARM64)
+
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 10 SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+          dotnet-quality: 'preview'
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust_target }}
+
+      - name: Cache Cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            Desktop_App/UpgrahanRust/src-tauri/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('Desktop_App/UpgrahanRust/src-tauri/Cargo.toml') }}
+
+      # WebKitGTK is the Linux webview Tauri renders into; Windows uses the
+      # preinstalled WebView2 and macOS uses WKWebView, so neither needs this.
+      - name: Install Linux WebView Dependencies
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+
+      - name: Ensure NuGet Source
+        run: dotnet nuget add source https://api.nuget.org/v3/index.json -n nuget.org || true
+
+      # The Tauri app spawns gss-daemon to reach GeoSemanticSat.Core, so it has to
+      # be published self-contained and land next to the app binary.
+      - name: Publish Analysis Daemon
+        shell: bash
+        run: |
+          dotnet publish Desktop_App/Upgrahan2/src/GeoSemanticSat.Daemon/GeoSemanticSat.Daemon.csproj             -c Release -r ${{ matrix.rid }} --self-contained true             -o daemon-dist             --nowarn:NU1903,NU1902,NU1904
+
+      - name: Install Frontend Packages
+        working-directory: Desktop_App/UpgrahanRust
+        run: npm ci --no-audit --no-fund
+
+      - name: Build Tauri Application
+        working-directory: Desktop_App/UpgrahanRust
+        run: npm run desktop:build -- --target ${{ matrix.rust_target }}
+
+      - name: Package Portable Archive
+        shell: bash
+        run: |
+          mkdir -p dist/artifacts staging
+          BIN_DIR="Desktop_App/UpgrahanRust/src-tauri/target/${{ matrix.rust_target }}/release"
+
+          if [ "${{ matrix.os }}" = "windows-latest" ]; then
+            cp "$BIN_DIR/upgrahan-rust.exe" staging/UpaGraha.exe
+            cp -r daemon-dist/. staging/
+          elif [ "${{ matrix.os }}" = "macos-latest" ]; then
+            if cp -R "$BIN_DIR/bundle/macos/UpaGraha.app" staging/ 2>/dev/null; then
+              # locate_daemon looks beside current_exe, and inside a .app that is
+              # Contents/MacOS - NOT the directory holding the .app. Copying the daemon to
+              # the archive root instead would ship a macOS build that cannot start its
+              # analysis engine at all.
+              cp -r daemon-dist/. "staging/UpaGraha.app/Contents/MacOS/"
+            else
+              cp "$BIN_DIR/upgrahan-rust" staging/UpaGraha
+              chmod +x staging/UpaGraha
+              cp -r daemon-dist/. staging/
+            fi
+          else
+            cp "$BIN_DIR/upgrahan-rust" staging/UpaGraha
+            chmod +x staging/UpaGraha
+            cp -r daemon-dist/. staging/
+          fi
+
+          # The daemon is useless if it is not executable after the archive round-trip.
+          find staging -name 'gss-daemon' -exec chmod +x {} + 2>/dev/null || true
+
+          if [ "${{ matrix.os }}" = "windows-latest" ]; then
+            7z a -tzip "dist/artifacts/GeoSemanticSat-Tauri-${{ matrix.rid }}.zip" ./staging/*
+          else
+            tar -czvf "dist/artifacts/GeoSemanticSat-Tauri-${{ matrix.rid }}.tar.gz" -C staging .
+          fi
+
+      - name: Upload Tauri Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-tauri-${{ matrix.rid }}
+          path: dist/artifacts/*
+          if-no-files-found: error
+
+  build-universal:
+    name: Build Universal Bundle (${{ matrix.platform_name }})
+    needs: test
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            rid: win-x64
+            rust_target: x86_64-pc-windows-msvc
+            platform_name: Windows x64
+          - os: ubuntu-latest
+            rid: linux-x64
+            rust_target: x86_64-unknown-linux-gnu
+            platform_name: Linux x64
+          - os: macos-latest
+            rid: osx-arm64
+            rust_target: aarch64-apple-darwin
+            platform_name: macOS Apple Silicon (ARM64)
+
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 10 SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+          dotnet-quality: 'preview'
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust_target }}
+
+      - name: Cache Cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            Desktop_App/UpgrahanRust/src-tauri/target
+          key: ${{ runner.os }}-cargo-universal-${{ hashFiles('Desktop_App/UpgrahanRust/src-tauri/Cargo.toml') }}
+
+      - name: Install Linux WebView Dependencies
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+
+      - name: Ensure NuGet Source
+        run: dotnet nuget add source https://api.nuget.org/v3/index.json -n nuget.org || true
+
+      # Both frontends and the analysis daemon land in ONE directory. That co-location is
+      # what makes the switch work at all: each build looks for its sibling next to its own
+      # executable, and refuses to offer the control when it is not there.
+      - name: Publish Avalonia Frontend
+        shell: bash
+        run: |
+          dotnet publish Desktop_App/Upgrahan2/src/GeoSemanticSat.UI/GeoSemanticSat.UI.csproj             -c Release -r ${{ matrix.rid }} --self-contained true             -o universal             --nowarn:NU1903,NU1902,NU1904
+
+      - name: Publish Analysis Daemon
+        shell: bash
+        run: |
+          dotnet publish Desktop_App/Upgrahan2/src/GeoSemanticSat.Daemon/GeoSemanticSat.Daemon.csproj             -c Release -r ${{ matrix.rid }} --self-contained true             -o universal             --nowarn:NU1903,NU1902,NU1904
+
+      - name: Install Frontend Packages
+        working-directory: Desktop_App/UpgrahanRust
+        run: npm ci --no-audit --no-fund
+
+      - name: Build Tauri Frontend
+        working-directory: Desktop_App/UpgrahanRust
+        run: npm run desktop:build -- --target ${{ matrix.rust_target }}
+
+      - name: Assemble Universal Bundle
+        shell: bash
+        run: |
+          BIN_DIR="Desktop_App/UpgrahanRust/src-tauri/target/${{ matrix.rust_target }}/release"
+
+          if [ "${{ matrix.os }}" = "windows-latest" ]; then
+            cp "$BIN_DIR/upgrahan-rust.exe" universal/upgrahan-rust.exe
+          else
+            cp "$BIN_DIR/upgrahan-rust" universal/upgrahan-rust
+            chmod +x universal/upgrahan-rust "universal/GeoSemanticSat.UI"
+          fi
+
+          # Neither build is "the" entry point - the user picks one and can switch from
+          # inside it. A README beats guessing which executable to double-click.
+          cat > universal/README.txt <<'TXT'
+          UpaGraha - universal bundle
+
+          Two frontends over the same analysis engine. Start either one:
+
+            GeoSemanticSat.UI    the Avalonia build
+            upgrahan-rust        the experimental Rust/Tauri build
+
+          Each has a control in its header to close itself and reopen the other. That
+          control only appears when both are present, which is why it is offered here and
+          not in the single-frontend downloads.
+
+          gss-daemon is the shared analysis engine. Both frontends start it themselves;
+          you do not run it directly.
+          TXT
+
+          mkdir -p dist/artifacts
+          if [ "${{ matrix.os }}" = "windows-latest" ]; then
+            7z a -tzip "dist/artifacts/GeoSemanticSat-Universal-${{ matrix.rid }}.zip" ./universal/*
+          else
+            tar -czvf "dist/artifacts/GeoSemanticSat-Universal-${{ matrix.rid }}.tar.gz" -C universal .
+          fi
+
+      # Prove the switch can actually work in what we just built, rather than finding out
+      # from a user that the control is missing. Both executables and the daemon must be
+      # present and co-located, or the control hides itself and the bundle is pointless.
+      - name: Verify The Bundle Can Switch
+        shell: bash
+        run: |
+          set -e
+          if [ "${{ matrix.os }}" = "windows-latest" ]; then
+            AVALONIA=universal/GeoSemanticSat.UI.exe; TAURI=universal/upgrahan-rust.exe; DAEMON=universal/gss-daemon.exe
+          else
+            AVALONIA=universal/GeoSemanticSat.UI;     TAURI=universal/upgrahan-rust;     DAEMON=universal/gss-daemon
+          fi
+
+          missing=0
+          for f in "$AVALONIA" "$TAURI" "$DAEMON"; do
+            if [ ! -f "$f" ]; then echo "MISSING from the universal bundle: $f"; missing=1; fi
+          done
+          [ "$missing" -eq 0 ] || { echo "The universal bundle cannot switch frontends."; exit 1; }
+          echo "Both frontends and the daemon are co-located; the switch control will appear."
+
+      - name: Upload Universal Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-universal-${{ matrix.rid }}
+          path: dist/artifacts/*
+          if-no-files-found: error
+
   publish-release:
     name: Publish GitHub Release
-    needs: build
+    needs: [build, build-tauri, build-universal]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Source Code
@@ -253,6 +516,33 @@ jobs:
           | **macOS Intel** | `GeoSemanticSat-Desktop-osx-x64.tar.gz` | Native Intel x64 self-contained archive. |
           | **Verification** | `SHA256SUMS.txt` | SHA-256 cryptographic hashes for integrity verification. |
 
+          #### Which package?
+
+          There are two frontends over the same analysis engine, and three ways to get them.
+          The numbers they produce are identical - both call the same compiled core - so the
+          choice is about the interface, not the results.
+
+          | Package | Contains | Pick this if |
+          |:---|:---|:---|
+          | `GeoSemanticSat-Desktop-*` | Avalonia frontend | You want the established build. |
+          | `GeoSemanticSat-Tauri-*` | Rust/Tauri frontend | You want the experimental build on its own. |
+          | `GeoSemanticSat-Universal-*` | **Both**, side by side | You want to compare them, or switch without reinstalling. |
+
+          Only the universal bundle can switch. Each frontend looks for its sibling next to
+          its own executable, so in the single-frontend downloads the control is absent
+          rather than present-and-broken.
+
+          | Universal | Package |
+          |:---|:---|
+          | **Windows x64** | `GeoSemanticSat-Universal-win-x64.zip` |
+          | **Linux x64** | `GeoSemanticSat-Universal-linux-x64.tar.gz` |
+          | **macOS Apple Silicon** | `GeoSemanticSat-Universal-osx-arm64.tar.gz` |
+
+          In the universal bundle, start either `GeoSemanticSat.UI` or `upgrahan-rust`.
+          Each has a control in its header that closes itself and reopens the other; the
+          Tauri side shows a five-second countdown you can cancel. Your loaded archive and
+          recorded verdicts are unaffected, because both drive the same analysis engine.
+
           ---
 
           ### Quick Start
@@ -300,6 +590,12 @@ jobs:
             release-assets/GeoSemanticSat-Desktop-linux-x64.tar.gz
             release-assets/GeoSemanticSat-Desktop-osx-arm64.tar.gz
             release-assets/GeoSemanticSat-Desktop-osx-x64.tar.gz
+            release-assets/GeoSemanticSat-Tauri-win-x64.zip
+            release-assets/GeoSemanticSat-Tauri-linux-x64.tar.gz
+            release-assets/GeoSemanticSat-Tauri-osx-arm64.tar.gz
+            release-assets/GeoSemanticSat-Universal-win-x64.zip
+            release-assets/GeoSemanticSat-Universal-linux-x64.tar.gz
+            release-assets/GeoSemanticSat-Universal-osx-arm64.tar.gz
             release-assets/SHA256SUMS.txt
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

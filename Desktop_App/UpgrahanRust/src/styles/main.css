@@ -1,0 +1,163 @@
+/*
+ * Tailwind v4 CSS-first config, following Cap's packages/ui-solid/src/main.css.
+ * Token VALUES live in theme.css; this file only maps them onto Tailwind utilities.
+ * Spacing, radii and breakpoints are stock Tailwind v4 - Cap overrides none of them.
+ */
+
+@import "tailwindcss";
+@import "./theme.css";
+@import "@fontsource/geist-sans/400.css";
+@import "@fontsource/geist-sans/500.css";
+@import "@fontsource/geist-sans/700.css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme {
+  --color-gray-1: var(--gray-1);
+  --color-gray-2: var(--gray-2);
+  --color-gray-3: var(--gray-3);
+  --color-gray-4: var(--gray-4);
+  --color-gray-5: var(--gray-5);
+  --color-gray-6: var(--gray-6);
+  --color-gray-7: var(--gray-7);
+  --color-gray-8: var(--gray-8);
+  --color-gray-9: var(--gray-9);
+  --color-gray-10: var(--gray-10);
+  --color-gray-11: var(--gray-11);
+  --color-gray-12: var(--gray-12);
+
+  --color-blue-1: var(--blue-1);
+  --color-blue-2: var(--blue-2);
+  --color-blue-3: var(--blue-3);
+  --color-blue-4: var(--blue-4);
+  --color-blue-5: var(--blue-5);
+  --color-blue-6: var(--blue-6);
+  --color-blue-7: var(--blue-7);
+  --color-blue-8: var(--blue-8);
+  --color-blue-9: var(--blue-9);
+  --color-blue-10: var(--blue-10);
+  --color-blue-11: var(--blue-11);
+  --color-blue-12: var(--blue-12);
+
+  --color-red-1: var(--red-1);
+  --color-red-3: var(--red-3);
+  --color-red-6: var(--red-6);
+  --color-red-9: var(--red-9);
+  --color-red-10: var(--red-10);
+  --color-red-11: var(--red-11);
+
+  /* Cap maps Tailwind's "emerald-*" onto the Radix jade ramp. Kept for fidelity. */
+  --color-emerald-1: var(--jade-1);
+  --color-emerald-3: var(--jade-3);
+  --color-emerald-9: var(--jade-9);
+  --color-emerald-11: var(--jade-11);
+
+  --color-yellow-3: var(--yellow-3);
+  --color-yellow-9: var(--yellow-9);
+  --color-yellow-11: var(--yellow-11);
+
+  /* Editor surfaces - the layer most of this app's chrome is built from. */
+  --color-ed-window: var(--ed-window);
+  --color-ed-card: var(--ed-card);
+  --color-ed-card-2: var(--ed-card-2);
+  --color-ed-stage: var(--ed-stage);
+  --color-ed-line: var(--ed-line);
+  --color-ed-line-strong: var(--ed-line-strong);
+  --color-ed-text-1: var(--ed-text-1);
+  --color-ed-text-2: var(--ed-text-2);
+  --color-ed-text-3: var(--ed-text-3);
+  --color-ed-ctl: var(--ed-ctl);
+  --color-ed-ctl-hover: var(--ed-ctl-hover);
+  --color-ed-ctl-active: var(--ed-ctl-active);
+  --color-ed-accent: var(--ed-accent);
+  --color-ed-accent-2: var(--ed-accent-2);
+
+  --color-type-construction: var(--type-construction);
+  --color-type-clearance: var(--type-clearance);
+  --color-type-water: var(--type-water);
+  --color-type-road: var(--type-road);
+  --color-type-activity: var(--type-activity);
+  --color-type-nochange: var(--type-nochange);
+
+  --color-verdict-verified: var(--verdict-verified);
+  --color-verdict-candidate: var(--verdict-candidate);
+  --color-verdict-rejected: var(--verdict-rejected);
+  --color-verdict-pending: var(--verdict-pending);
+
+  --shadow-s: var(--shadow-s);
+  --shadow-ed-card: var(--ed-card-shadow);
+  --shadow-ed-pop: var(--ed-pop-shadow);
+
+  --font-sans: "Geist Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "Cascadia Mono", Consolas, ui-monospace, monospace;
+
+  --animate-shimmer: shimmer 2s ease-in-out infinite;
+}
+
+@layer base {
+  /* Cap's preflight border default, so an unqualified `border` is already a hairline. */
+  *,
+  ::after,
+  ::before,
+  ::backdrop,
+  ::file-selector-button {
+    border-color: var(--ed-line);
+  }
+
+  /*
+   * Native controls - <select> popups, date pickers, number spinners, scrollbars - are
+   * drawn by the OS, not the page, so no CSS of ours reaches inside them. Without this
+   * the WebView renders them light-on-light and the <select> options read as disabled.
+   * color-scheme is the only lever that theme, so it belongs at the root, once.
+   */
+  :root {
+    color-scheme: dark;
+  }
+
+  :root:not(.dark) {
+    color-scheme: light;
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+    overflow: hidden;
+  }
+
+  body {
+    /* Cap ships Geist at 400/500/700 and sets body to 500. */
+    font-family: var(--font-sans);
+    font-weight: 500;
+    background-color: var(--ed-window);
+    color: var(--ed-text-1);
+    -webkit-font-smoothing: antialiased;
+    /* Desktop chrome: text selection is opt-in, as in a native app. */
+    user-select: none;
+    cursor: default;
+  }
+
+  input,
+  textarea,
+  [data-selectable] {
+    user-select: text;
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--ed-ctl-active);
+    border-radius: 999px;
+    border: 3px solid transparent;
+    background-clip: content-box;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--ed-text-3);
+    background-clip: content-box;
+  }
+}

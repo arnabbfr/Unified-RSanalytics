@@ -45,6 +45,18 @@ public class MultiTemporalChangeDetector
         int h = Math.Min(t1.Height, t2.Height);
         int patchSize = options.PatchSize;
 
+        // A non-positive patchSize never terminates: the bound (h - patchSize) grows while
+        // the counter steps by a negative stride, so `py <= h - patchSize` is always true,
+        // and a stride of 0 never advances at all. Because every caller holds a lock for the
+        // duration, that turned one bad request into a permanent hang of the whole process
+        // rather than an error. Rejected here rather than at the loop so an invalid request
+        // does not first pay for masking, normalization, every spectral index and drift
+        // estimation while holding that lock.
+        if (patchSize <= 0)
+            throw new ArgumentOutOfRangeException(
+                nameof(options), patchSize,
+                $"{nameof(ChangeDetectionOptions.PatchSize)} must be greater than zero.");
+
         var mask1 = options.EnableQualityMasking ? QualityMaskEngine.GenerateQualityMask(t1) : new QualityMaskFlags[h, w];
         var mask2 = options.EnableQualityMasking ? QualityMaskEngine.GenerateQualityMask(t2) : new QualityMaskFlags[h, w];
 

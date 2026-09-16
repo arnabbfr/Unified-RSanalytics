@@ -39,3 +39,14 @@ Jyotirmoy_SETUP.md
 .claude/
 .preview/
 skills-lock.json
+
+# Rust / Tauri frontend
+target/
+node_modules/
+Desktop_App/UpgrahanRust/src-tauri/gen/
+
+# Tauri frontend build output
+Desktop_App/UpgrahanRust/dist/
+
+# Locally assembled universal bundle (python dev.py bundle)
+/dist/
