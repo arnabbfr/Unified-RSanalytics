@@ -83,10 +83,22 @@ function ResultThumbnail(props: { result: SearchResult; renderMode: VisualRender
   );
 }
 
-function ResultRow(props: { result: SearchResult }) {
+/**
+ * Strength tier for a similarity score. Display buckets over a raw -1..1 score, not
+ * calibrated classes - they exist so an analyst can scan the list at a glance, not as a
+ * claim about confidence.
+ */
+function strengthTier(similarity: number): "Strong" | "Moderate" | "Weak" {
+  if (similarity >= 0.3) return "Strong";
+  if (similarity >= 0.15) return "Moderate";
+  return "Weak";
+}
+
+function ResultRow(props: { result: SearchResult; rank: number }) {
   const [state, actions] = useApp();
   const centre = () => patchCentre(props.result.patch.bounds);
   const canInspect = () => actions.canEnter(3);
+  const tier = () => strengthTier(props.result.similarityScore);
 
   return (
     <Card class="flex items-center gap-3 p-3 transition-colors hover:bg-ed-ctl-hover">
@@ -94,6 +106,7 @@ function ResultRow(props: { result: SearchResult }) {
 
       <div class="flex min-w-0 flex-1 flex-col gap-0.5">
         <div class="flex items-center gap-2">
+          <span class="shrink-0 font-mono text-[11px] text-ed-text-3">#{props.rank}</span>
           <span class="truncate text-[13px] text-ed-text-1">{props.result.patch.patchId}</span>
           <Show when={props.result.patch.hasCloudOrShadow}>
             <Badge tone="caution">Cloud/shadow</Badge>
@@ -109,7 +122,10 @@ function ResultRow(props: { result: SearchResult }) {
       </div>
 
       <div class="flex shrink-0 flex-col items-end gap-2">
-        <SimilarityScore value={props.result.similarityScore} />
+        <div class="flex items-center gap-1.5">
+          <SimilarityScore value={props.result.similarityScore} />
+          <Badge tone={tier() === "Strong" ? "accent" : "neutral"}>{tier()}</Badge>
+        </div>
         <div class="flex items-center gap-1.5">
           <Button
             variant="gray"
@@ -256,6 +272,10 @@ export function StageFindImages() {
             )}
           </For>
         </div>
+
+        <p class="mt-2 text-[11px] text-ed-text-3">
+          Result = looks like your description · Candidate = something changed here · Verified = a person confirmed it
+        </p>
       </div>
 
       <div class="min-h-0 flex-1 overflow-y-auto p-4">
@@ -266,11 +286,28 @@ export function StageFindImages() {
               <EmptyState
                 title="No results yet"
                 hint="Describe a place, or run one of the preset searches above, to find images that match."
-              />
+              >
+                <Show when={state.sensorFilter !== "All"}>
+                  <Button
+                    variant="gray"
+                    size="sm"
+                    onClick={() => {
+                      actions.setSensorFilter("All");
+                      actions.setSortOrder("similarity");
+                    }}
+                  >
+                    Clear filters
+                  </Button>
+                </Show>
+                <Button variant="gray" size="sm" onClick={() => runSearch(PRESET_QUERIES[0]!)}>
+                  <IconSparkles class="size-3.5" />
+                  Try a preset
+                </Button>
+              </EmptyState>
             }
           >
             <div class="flex flex-col gap-2">
-              <For each={visibleResults()}>{(r) => <ResultRow result={r} />}</For>
+              <For each={visibleResults()}>{(r, i) => <ResultRow result={r} rank={i() + 1} />}</For>
             </div>
           </Show>
         </Show>

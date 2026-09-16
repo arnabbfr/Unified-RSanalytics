@@ -1,5 +1,4 @@
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { invoke } from "@tauri-apps/api/core";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { For, Match, Show, Switch, createSignal, onCleanup, onMount, type JSX } from "solid-js";
 import { Toaster } from "solid-toast";
@@ -17,6 +16,7 @@ import IconGauge from "~icons/lucide/gauge";
 import IconLoaderCircle from "~icons/lucide/loader-circle";
 
 import { Button } from "~/components/Button";
+import { FrontendSwitch } from "~/components/FrontendSwitch";
 import { ErrorNote } from "~/components/ui";
 import { api, setDaemonRestartHandler } from "~/lib/daemon";
 import { cn } from "~/lib/cn";
@@ -33,7 +33,6 @@ import { StageReviewExport } from "~/routes/StageReviewExport";
  */
 function Titlebar() {
   const [state, actions] = useApp();
-  const [canSwitch, setCanSwitch] = createSignal(false);
 
   const [benchmarking, setBenchmarking] = createSignal(false);
 
@@ -61,14 +60,6 @@ function Titlebar() {
     pickGeoTiffWith((path) => actions.loadGeoTiff(path)).catch((e) =>
       notify.error(messageOf(e)),
     );
-
-  onMount(async () => {
-    try {
-      setCanSwitch(await invoke<boolean>("avalonia_available"));
-    } catch {
-      setCanSwitch(false);
-    }
-  });
 
   const appWindow = getCurrentWindow();
 
@@ -116,18 +107,7 @@ function Titlebar() {
           <IconCircleHelp class="size-3.5" />
         </Button>
 
-        {/* Only offered in the combined bundle where both builds sit side by side. */}
-        <Show when={canSwitch()}>
-          <Button
-            variant="ghost"
-            size="sm"
-            title="Relaunch in the Avalonia build"
-            onClick={() => invoke("switch_to_avalonia").catch(() => undefined)}
-          >
-            <IconRepeat class="size-3.5" />
-            Avalonia UI
-          </Button>
-        </Show>
+        <FrontendSwitch />
 
         <div class="ml-1 flex items-center">
           <WindowButton label="Minimise" onClick={() => appWindow.minimize()}>

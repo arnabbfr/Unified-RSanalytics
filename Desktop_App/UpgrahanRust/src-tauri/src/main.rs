@@ -6,6 +6,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod daemon;
+mod handoff;
 mod tiles;
 
 use daemon::{DaemonEndpoint, DaemonState};
@@ -41,52 +42,29 @@ fn cached_tile_count(provider: String) -> usize {
     tiles::cached_tile_count(&provider)
 }
 
-/// Relaunches into the Avalonia build and exits this one.
+/// Whether the Avalonia build can be switched to, and whether it is already up.
 ///
-/// Only offered when the sibling executable is actually present next to us (the combined
-/// demo bundle). Separate downloads simply will not find it, and the UI hides the control.
+/// The UI only offers the control when this reports available, so the switch is never
+/// presented in a build where it cannot work.
 #[tauri::command]
-fn switch_to_avalonia(app: tauri::AppHandle) -> Result<(), String> {
-    let exe_name = if cfg!(windows) {
-        "GeoSemanticSat.UI.exe"
-    } else {
-        "GeoSemanticSat.UI"
-    };
-
-    let sibling = std::env::current_exe()
-        .map_err(|e| format!("Could not resolve the current executable: {e}"))?
-        .parent()
-        .ok_or("Could not resolve the install directory.")?
-        .join(exe_name);
-
-    if !sibling.is_file() {
-        return Err(format!(
-            "The Avalonia build is not installed alongside this one ({}).",
-            sibling.display()
-        ));
-    }
-
-    std::process::Command::new(&sibling)
-        .spawn()
-        .map_err(|e| format!("Could not launch the Avalonia build: {e}"))?;
-
-    app.exit(0);
-    Ok(())
+fn avalonia_target() -> handoff::HandoffTarget {
+    handoff::avalonia_target()
 }
 
-/// True when the sibling Avalonia binary exists, so the UI can hide the switch control.
+/// Hands the session to the Avalonia build and closes this one.
+///
+/// The preference is written before the launch so the app that comes up already owns the
+/// session, and rolled back inside the handoff if the launch is refused - so a failure
+/// here means nothing changed and the caller only has to revert its own toggle.
 #[tauri::command]
-fn avalonia_available() -> bool {
-    let exe_name = if cfg!(windows) {
-        "GeoSemanticSat.UI.exe"
-    } else {
-        "GeoSemanticSat.UI"
-    };
+fn switch_to_avalonia(app: tauri::AppHandle) -> Result<(), String> {
+    handoff::switch_to_avalonia()?;
 
-    std::env::current_exe()
-        .ok()
-        .and_then(|p| p.parent().map(|d| d.join(exe_name)))
-        .is_some_and(|p| p.is_file())
+    // Give the child a moment to get its window up before this one disappears, so the
+    // desktop is never briefly empty.
+    std::thread::sleep(std::time::Duration::from_millis(600));
+    app.exit(0);
+    Ok(())
 }
 
 fn main() {
@@ -102,7 +80,7 @@ fn main() {
             write_cached_tile,
             cached_tile_count,
             switch_to_avalonia,
-            avalonia_available,
+            avalonia_target,
         ])
         .on_window_event(|window, event| {
             // Kill the daemon with the window, so closing the UI never strands a child

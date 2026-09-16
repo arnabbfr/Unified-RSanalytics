@@ -265,6 +265,10 @@ public partial class MainWindow : SukiUI.Controls.SukiWindow
 
         this.SizeChanged += (s, e) => UpdateAdaptiveLayout(e.NewSize.Width);
         InitializeDragAndDrop();
+        // Only surface the switch in the combined bundle; a standalone install has nothing
+        // to switch to and a dead control is worse than no control.
+        BtnSwitchToTauri.IsVisible = Services.FrontendHandoff.IsAvailable;
+
         InitializeArchive();
         InitializeMapControls();
         UpdateAdaptiveLayout(this.Bounds.Width > 0 ? this.Bounds.Width : 1280);
@@ -1842,6 +1846,28 @@ public partial class MainWindow : SukiUI.Controls.SukiWindow
         {
             Console.WriteLine($"File selection error: {ex.Message}");
         }
+    }
+
+    /// <summary>
+    /// Hands the session to the Tauri build and closes this window.
+    ///
+    /// Deliberately simpler than the Tauri side's countdown takeover: this build is the
+    /// established one, and a five-second overlay to leave it would be ceremony without
+    /// purpose. The confirmation is the dialog; the handoff itself is identical.
+    /// </summary>
+    private async void OnSwitchToTauriClicked(object? sender, RoutedEventArgs e)
+    {
+        string? failure = Services.FrontendHandoff.SwitchToTauri();
+
+        if (failure is not null)
+        {
+            TxtTelemetryArchive.Text = failure;
+            return;
+        }
+
+        // Give the child a moment to get a window up so the desktop is never briefly empty.
+        await Task.Delay(600);
+        Close();
     }
 
     private void OnHelpGuideClicked(object? sender, RoutedEventArgs e)

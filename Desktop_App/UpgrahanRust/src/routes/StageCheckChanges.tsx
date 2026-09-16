@@ -14,11 +14,13 @@ import { Button } from "~/components/Button";
 import { Select, type SelectOption } from "~/components/Select";
 import {
   Card,
+  changeTypeLabel,
   ChangeTypeChip,
   EmptyState,
   ErrorNote,
   EvidenceScore,
   formatArea,
+  formatAreaWithHectares,
   formatCoord,
   formatDate,
   Metric,
@@ -84,6 +86,45 @@ const DELTA_AXIS_CAPTION: Record<IndexKey, string> = {
 };
 
 const formatDelta = (v: number) => `${v >= 0 ? "+" : ""}${v.toFixed(3)}`;
+
+// Below this magnitude a spectral index delta is noise, not evidence - it does not clear
+// the bar to be worth a sentence in the evidence panel.
+const EVIDENCE_SENTENCE_THRESHOLD = 0.05;
+
+/** Human-readable bullets over the four spectral deltas, for the evidence panel. */
+function evidenceSentences(metrics: Record<string, number>): string[] {
+  const lines: string[] = [];
+
+  const ndvi = metrics.DeltaNDVI;
+  if (ndvi !== undefined && Math.abs(ndvi) >= EVIDENCE_SENTENCE_THRESHOLD) {
+    lines.push(
+      ndvi < 0
+        ? `Vegetation loss: NDVI fell by ${Math.abs(ndvi).toFixed(3)}`
+        : `Vegetation gain: NDVI rose by ${ndvi.toFixed(3)}`,
+    );
+  }
+
+  const ndbi = metrics.DeltaNDBI;
+  if (ndbi !== undefined && ndbi >= EVIDENCE_SENTENCE_THRESHOLD) {
+    lines.push(`Built-up signal increased by ${ndbi.toFixed(3)}`);
+  }
+
+  const bsi = metrics.DeltaBSI;
+  if (bsi !== undefined && bsi >= EVIDENCE_SENTENCE_THRESHOLD) {
+    lines.push(`Bare soil exposure increased by ${bsi.toFixed(3)}`);
+  }
+
+  const ndwi = metrics.DeltaNDWI;
+  if (ndwi !== undefined && Math.abs(ndwi) >= EVIDENCE_SENTENCE_THRESHOLD) {
+    lines.push(
+      ndwi < 0
+        ? `Water signal fell by ${Math.abs(ndwi).toFixed(3)}`
+        : `Water signal increased by ${ndwi.toFixed(3)}`,
+    );
+  }
+
+  return lines;
+}
 
 /**
  * Horizontal strip of the 4-scene archive time series (`state.session.tiles`). Clicking a
@@ -479,6 +520,15 @@ function EvidencePanel(props: { record: ChangeRecord; onVerdictSubmitted: () => 
 
   const metricEntries = createMemo(() => Object.entries(props.record.metrics));
 
+  // Belief, not fact: a Candidate is unverified until an analyst confirms it (CONTEXT.md),
+  // so this reads "Likely", never "Confirmed".
+  const headline = createMemo(
+    () =>
+      `Likely ${changeTypeLabel(props.record.type).toLowerCase()}, covering ${formatArea(props.record.areaSqMeters)}, first visible ${formatDate(props.record.earliestObservationTimestamp)}.`,
+  );
+
+  const sentences = createMemo(() => evidenceSentences(props.record.metrics));
+
   const submit = (verdict: "confirm" | "reject" | "flag") => {
     void actions.verdict(props.record.id, verdict, notes());
     // Confirm/Reject are done with this candidate, so move on. Flag means "come back to
@@ -490,16 +540,39 @@ function EvidencePanel(props: { record: ChangeRecord; onVerdictSubmitted: () => 
     <div class="flex h-full min-h-0 flex-col gap-4 overflow-y-auto">
       <div>
         <p class="mb-2 text-[10px] uppercase tracking-wide text-ed-text-3">Evidence</p>
+        <p class="mb-3 text-[13px] text-ed-text-1">{headline()}</p>
         <div class="grid grid-cols-2 gap-3">
           <Metric label="Type" value={props.record.type} />
           <Metric label="Evidence score" value={props.record.confidence.toFixed(2)} mono />
-          <Metric label="Area" value={formatArea(props.record.areaSqMeters)} />
+          <Metric label="Area" value={formatAreaWithHectares(props.record.areaSqMeters)} />
           <Metric label="Affected pixels" value={props.record.affectedPixels.toLocaleString()} mono />
           <Metric label="T1 date" value={formatDate(props.record.timestampT1)} />
           <Metric label="T2 date" value={formatDate(props.record.timestampT2)} />
           <Metric label="Onset (estimated)" value={formatDate(props.record.earliestObservationTimestamp)} />
           <Metric label="Centre" value={formatCoord(props.record.center)} mono />
         </div>
+      </div>
+
+      <div class="flex flex-col gap-1.5 border-t border-ed-line pt-3">
+        <span class="text-[10px] uppercase tracking-wide text-ed-text-3">What the indices show</span>
+        <Show
+          when={sentences().length > 0}
+          fallback={
+            <div class="flex items-start gap-1.5 text-[11px] text-ed-text-2">
+              <span class="mt-1 size-1.5 shrink-0 rounded-full bg-ed-text-3" />
+              <span>The change was detected on combined spectral magnitude rather than any single index.</span>
+            </div>
+          }
+        >
+          <For each={sentences()}>
+            {(line) => (
+              <div class="flex items-start gap-1.5 text-[11px] text-ed-text-2">
+                <span class="mt-1 size-1.5 shrink-0 rounded-full bg-ed-accent" />
+                <span>{line}</span>
+              </div>
+            )}
+          </For>
+        </Show>
       </div>
 
       <Show when={metricEntries().length > 0}>

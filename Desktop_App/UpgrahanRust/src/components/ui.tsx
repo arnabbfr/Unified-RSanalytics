@@ -110,6 +110,9 @@ export function ChangeTypeChip(props: { type: ChangeType; class?: string }) {
   );
 }
 
+/** The same label ChangeTypeChip renders, for spots that need the word rather than the chip. */
+export const changeTypeLabel = (type: ChangeType) => TYPE_STYLE[type].label;
+
 const STATUS_TONE: Record<ReviewStatus, VariantProps<typeof badgeStyles>["tone"]> = {
   Pending: "neutral",
   Confirmed: "verified",
@@ -253,6 +256,9 @@ export function Metric(props: { label: string; value: string; mono?: boolean }) 
 
 export const formatArea = (sqm: number) =>
   sqm >= 1_000_000 ? `${(sqm / 1_000_000).toFixed(2)} km²` : `${Math.round(sqm).toLocaleString()} m²`;
+
+/** formatArea plus hectares (1 ha = 10,000 m²), for panels that want the analyst-familiar unit alongside it. */
+export const formatAreaWithHectares = (sqm: number) => `${formatArea(sqm)} · ${(sqm / 10_000).toFixed(2)} ha`;
 
 export const formatDate = (iso: string) =>
   new Date(iso).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
