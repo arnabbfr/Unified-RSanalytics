@@ -11,6 +11,7 @@ import IconSatellite from "~icons/lucide/satellite";
 import IconCheck from "~icons/lucide/check";
 import IconImport from "~icons/lucide/import";
 import IconCircleHelp from "~icons/lucide/circle-help";
+import IconArrowRight from "~icons/lucide/arrow-right";
 
 import { Button } from "~/components/Button";
 import { ErrorNote } from "~/components/ui";
@@ -184,6 +185,18 @@ function WindowButton(props: {
 function StageRail() {
   const [state, actions] = useApp();
 
+  const canAdvance = () => state.stage < 5 && actions.canEnter((state.stage + 1) as StageId);
+
+  /** Why Next is unavailable, phrased as the thing to do rather than the thing missing. */
+  const blockedReason = () =>
+    ({
+      1: "run a search",
+      2: "search an area for candidates",
+      3: "run change detection",
+      4: "group the places",
+      5: "",
+    })[state.stage];
+
   return (
     <nav class="flex shrink-0 items-center gap-1 border-b border-ed-line bg-ed-card px-3 py-2">
       <For each={STAGES}>
@@ -233,6 +246,28 @@ function StageRail() {
         {(stage) => (
           <p class="hidden pr-1 text-[11px] text-ed-text-3 lg:block">{stage().caption}</p>
         )}
+      </Show>
+
+      {/*
+        Avalonia's BtnNextStage. The rail alone leaves the next step implicit; this is the
+        one obvious forward action, and it states WHY it is blocked rather than just
+        greying out - a disabled control with no reason is the thing users get stuck on.
+      */}
+      <Show when={state.stage < 5}>
+        <Button
+          variant="blue"
+          size="sm"
+          disabled={!canAdvance()}
+          title={
+            canAdvance()
+              ? `Continue to ${STAGES.find((x) => x.id === state.stage + 1)?.name ?? "the next step"}`
+              : `Finish this step first — ${blockedReason()}`
+          }
+          onClick={() => actions.setStage((state.stage + 1) as StageId)}
+        >
+          Next
+          <IconArrowRight class="size-3.5" />
+        </Button>
       </Show>
     </nav>
   );

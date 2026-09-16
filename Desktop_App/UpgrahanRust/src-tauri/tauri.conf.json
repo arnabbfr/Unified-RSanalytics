@@ -22,7 +22,8 @@
         "decorations": false,
         "transparent": false,
         "theme": "Dark",
-        "dragDropEnabled": true
+        "dragDropEnabled": true,
+        "label": "main"
       }
     ],
     "security": {

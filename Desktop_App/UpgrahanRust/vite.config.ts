@@ -4,10 +4,9 @@ import solid from "vite-plugin-solid";
 import tailwindcss from "@tailwindcss/vite";
 import Icons from "unplugin-icons/vite";
 
-import { reticle } from '@reticlehq/vite-plugin';
 // Tauri serves the built assets from disk, so no SSR and a fixed dev port it can attach to.
 export default defineConfig({
-  plugins: [reticle(),solid(), tailwindcss(), Icons({ compiler: "solid" })],
+  plugins: [solid(), tailwindcss(), Icons({ compiler: "solid" })],
   resolve: {
     // tsconfig `paths` only teaches tsc about `~/`; the bundler needs telling separately.
     alias: { "~": fileURLToPath(new URL("./src", import.meta.url)) },
