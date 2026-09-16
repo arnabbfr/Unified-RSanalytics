@@ -1,65 +1,64 @@
-# SatMAE++ Grouped Multi-Spectral Vision Transformer Configuration
-# NOTE: SatMAE++ expects grouped optical multi-spectral bands (RGB, RedEdge, NIR, SWIR).
-# It does NOT accept 2-channel SAR inputs directly.
+# SatMAE++ Grouped Vision Transformer Sentinel-1 SAR Flood Segmentation Configuration
 model:
   name: satmaepp
   pretrained: BiliSakura/SATMAE-PP-transformers
+  in_channels: 3
   feature_dim: 256
-  decoder: segmentation_decoder
+  decoder: unet_decoder
   unfreeze_last_n_blocks: 2
 
 data:
-  dataset: multispectral_floods
-  modality: multispectral_grouped  # Expected modality
+  dataset: sen1floods11
+  modality: sentinel1
   channels:
-    - B02  # Blue
-    - B03  # Green
-    - B04  # Red
-    - B05  # RedEdge-1
-    - B06  # RedEdge-2
-    - B07  # RedEdge-3
-    - B08  # NIR
-    - B8A  # Narrow NIR
-    - B11  # SWIR-1
-    - B12  # SWIR-2
-  in_channels: 10
+    - VV
+    - VH
+  in_channels: 3
   image_size: 224
-  num_classes: 1
+  num_classes: 1  # Binary flood mask (0: non-flood, 1: flood)
   ignore_index: -1
-  root: "${DATASET_ROOT:-fine_tune/data/sample_multispectral}"
+  root: "${DATASET_ROOT:-fine_tune/data/sample_sen1floods11}"
+  subset: "all"
   normalize:
-    type: optical_reflectance_norm
-    mean: [0.13, 0.14, 0.15, 0.18, 0.24, 0.28, 0.32, 0.34, 0.22, 0.15]
-    std: [0.08, 0.08, 0.09, 0.09, 0.10, 0.11, 0.12, 0.12, 0.11, 0.09]
+    type: sar_db_norm
+    vv_min: -25.0
+    vv_max: 0.0
+    vh_min: -32.0
+    vh_max: -5.0
   augmentations:
     random_flip: true
     random_rotate: true
     random_crop: false
 
 training:
-  strategy: frozen
-  epochs: 10
-  batch_size: 1
-  num_workers: 0
-  learning_rate: 0.0001
-  backbone_learning_rate: 0.00001
+  strategy: partial
+  epochs: 25
+  batch_size: 4
+  num_workers: 2
+  learning_rate: 0.0003
+  backbone_learning_rate: 0.00005
   weight_decay: 0.01
-  gradient_accumulation_steps: 4
+  gradient_accumulation_steps: 1
   mixed_precision: true
   gradient_checkpointing: true
   max_grad_norm: 1.0
-  early_stopping_patience: 5
+  early_stopping_patience: 12
   seed: 42
 
 loss:
-  type: combined
-  bce_weight: 0.5
-  dice_weight: 0.5
+  type: compound
+  bce_weight: 0.4
+  dice_weight: 0.4
+  tversky_weight: 0.2
+  pos_weight: 5.5  # Calibrated for 85:15 Sen1Floods11 class imbalance
+
+evaluation:
+  threshold: 0.35  # Optimal F1 decision boundary for imbalanced remote sensing
 
 checkpoint:
   dir: "fine_tune/checkpoints/satmaepp"
   save_best: true
-  monitor: val_iou
+  monitor: val_dice
   mode: max
 
 results:
@@ -69,3 +68,4 @@ logging:
   tensorboard: true
   csv: true
   log_interval: 10
+

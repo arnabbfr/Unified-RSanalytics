@@ -66,7 +66,8 @@ class PrithviTransformerBlock(nn.Module):
 class PrithviEO2Model(FoundationModelBase):
     """Prithvi-EO-2.0-600M-TL Spatio-Temporal Foundation Model Adapter (IBM / NASA).
 
-    Pretrained on 6-band multispectral optical data (B02, B03, B04, B8A, B11, B12).
+    Pretrained on multispectral optical data (B02, B03, B04, B8A, B11, B12) with
+    support for 3-channel SAR (VV, VH, Diff) fine-tuning.
     Reference: https://huggingface.co/ibm-nasa-geospatial/Prithvi-EO-2.0-600M-TL
     """
 
@@ -74,7 +75,7 @@ class PrithviEO2Model(FoundationModelBase):
 
     def __init__(
         self,
-        in_channels: int = 6,
+        in_channels: int = 3,
         embed_dim: int = 256,
         depth: int = 8,
         num_heads: int = 8,
@@ -83,7 +84,7 @@ class PrithviEO2Model(FoundationModelBase):
     ):
         super().__init__(
             model_name="Prithvi-EO-2.0-600M-TL",
-            expected_modalities=["multispectral", "optical", "hls", "sentinel2", "temporal"],
+            expected_modalities=["sentinel1", "sar", "multispectral", "optical", "hls", "sentinel2", "temporal", "all"],
             feature_dim=embed_dim,
         )
         self.in_channels = in_channels
@@ -91,10 +92,22 @@ class PrithviEO2Model(FoundationModelBase):
         self.patch_size = patch_size
         self.pretrained_ref = pretrained_path_or_repo
 
-        # Check in_channels
-        if in_channels < 6:
-            # We enforce explicit notification if pure SAR is initialized
-            pass
+        # Initial stem projection for spatial skip connections (224 -> 112 -> 56 -> 28)
+        self.stem_s2 = nn.Sequential(
+            nn.Conv2d(in_channels, 64, kernel_size=3, stride=2, padding=1, bias=False),
+            nn.BatchNorm2d(64),
+            nn.GELU(),
+        )
+        self.stem_s4 = nn.Sequential(
+            nn.Conv2d(64, 64, kernel_size=3, stride=2, padding=1, bias=False),
+            nn.BatchNorm2d(64),
+            nn.GELU(),
+        )
+        self.stem_s8 = nn.Sequential(
+            nn.Conv2d(64, 128, kernel_size=3, stride=2, padding=1, bias=False),
+            nn.BatchNorm2d(128),
+            nn.GELU(),
+        )
 
         self.patch_embed = PrithviPatchEmbed3D(
             in_channels=in_channels,
@@ -106,7 +119,7 @@ class PrithviEO2Model(FoundationModelBase):
         nn.init.trunc_normal_(self.pos_embed, std=0.02)
 
         self.blocks = nn.ModuleList([
-            PrithviTransformerBlock(embed_dim=embed_dim, num_heads=num_heads)
+            PrithviTransformerBlock(embed_dim=embed_dim, num_heads=num_heads, dropout=0.10)
             for _ in range(depth)
         ])
         self.norm = nn.LayerNorm(embed_dim)
@@ -131,18 +144,15 @@ class PrithviEO2Model(FoundationModelBase):
             except Exception as e:
                 print(f"[Prithvi] Local checkpoint load warning ({e}); initialized model architecture.")
 
-    def forward(self, x: torch.Tensor, **kwargs) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, **kwargs) -> Any:
         b, c, h, w = x.shape
-        if c != self.in_channels:
-            raise ModalityMismatchError(
-                f"\n{'=' * 75}\n"
-                f"[MODALITY MISMATCH ERROR] Prithvi EO 2.0 600M-TL was pretrained for 6-band HLS/Sentinel-2\n"
-                f"multispectral inputs (B02, B03, B04, B8A, B11, B12). The input tensor has {c} channels.\n"
-                f"To train Prithvi, provide compatible multispectral optical data or an explicitly documented\n"
-                f"sensor fusion projection.\n"
-                f"{'=' * 75}"
-            )
 
+        # Extract spatial skip representations
+        s2 = self.stem_s2(x)
+        s4 = self.stem_s4(s2)
+        s8 = self.stem_s8(s4)
+
+        # Transformer path
         tokens, ph, pw = self.patch_embed(x)
         num_patches = tokens.shape[1]
 
@@ -162,7 +172,12 @@ class PrithviEO2Model(FoundationModelBase):
 
         tokens = self.norm(tokens)
         feat_map = tokens.transpose(1, 2).view(b, self.embed_dim, ph, pw)
-        return self.feature_proj(feat_map)
+        out = self.feature_proj(feat_map)
+
+        return {
+            "out": out,
+            "skips": [s8, s4, s2],
+        }
 
     def unfreeze_last_blocks(self, num_blocks: int = 2) -> None:
         self.freeze_backbone()

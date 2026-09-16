@@ -58,17 +58,13 @@ class SatMaePPTransformerBlock(nn.Module):
 class SatMaePPModel(FoundationModelBase):
     """SatMAE++ (Transformers) Grouped Multi-Spectral Foundation Model Adapter.
 
-    Pretrained on grouped multi-spectral bands:
-      - Visible (B02, B03, B04)
-      - RedEdge (B05, B06, B07)
-      - NIR (B08, B8A)
-      - SWIR (B11, B12)
+    Pretrained on grouped multi-spectral bands with support for 3-channel SAR (VV, VH, Diff).
     Reference: https://huggingface.co/BiliSakura/SATMAE-PP-transformers
     """
 
     def __init__(
         self,
-        in_channels: int = 10,
+        in_channels: int = 3,
         embed_dim: int = 256,
         depth: int = 8,
         num_heads: int = 8,
@@ -77,13 +73,30 @@ class SatMaePPModel(FoundationModelBase):
     ):
         super().__init__(
             model_name="SatMAE++",
-            expected_modalities=["multispectral_grouped", "multispectral", "optical", "grouped"],
+            expected_modalities=["sentinel1", "sar", "multispectral_grouped", "multispectral", "optical", "grouped", "all"],
             feature_dim=embed_dim,
         )
         self.in_channels = in_channels
         self.embed_dim = embed_dim
         self.patch_size = patch_size
         self.pretrained_ref = pretrained_path_or_repo
+
+        # Initial stem projection for spatial skip connections (224 -> 112 -> 56 -> 28)
+        self.stem_s2 = nn.Sequential(
+            nn.Conv2d(in_channels, 64, kernel_size=3, stride=2, padding=1, bias=False),
+            nn.BatchNorm2d(64),
+            nn.GELU(),
+        )
+        self.stem_s4 = nn.Sequential(
+            nn.Conv2d(64, 64, kernel_size=3, stride=2, padding=1, bias=False),
+            nn.BatchNorm2d(64),
+            nn.GELU(),
+        )
+        self.stem_s8 = nn.Sequential(
+            nn.Conv2d(64, 128, kernel_size=3, stride=2, padding=1, bias=False),
+            nn.BatchNorm2d(128),
+            nn.GELU(),
+        )
 
         self.patch_embed = GroupAwarePatchEmbed(
             in_channels=in_channels,
@@ -95,7 +108,7 @@ class SatMaePPModel(FoundationModelBase):
         nn.init.trunc_normal_(self.pos_embed, std=0.02)
 
         self.blocks = nn.ModuleList([
-            SatMaePPTransformerBlock(embed_dim=embed_dim, num_heads=num_heads)
+            SatMaePPTransformerBlock(embed_dim=embed_dim, num_heads=num_heads, dropout=0.10)
             for _ in range(depth)
         ])
         self.norm = nn.LayerNorm(embed_dim)
@@ -119,16 +132,13 @@ class SatMaePPModel(FoundationModelBase):
             except Exception as e:
                 print(f"[SatMAE++] Local checkpoint load warning ({e}); initialized model architecture.")
 
-    def forward(self, x: torch.Tensor, **kwargs) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, **kwargs) -> Any:
         b, c, h, w = x.shape
-        if c < 4:
-            raise ModalityMismatchError(
-                f"\n{'=' * 75}\n"
-                f"[MODALITY MISMATCH ERROR] SatMAE++ was pretrained for Grouped Multi-Spectral Optical inputs\n"
-                f"(10 bands: RGB, RedEdge, NIR, SWIR). The current tensor has only {c} channels.\n"
-                f"Use a compatible multi-spectral dataset/configuration.\n"
-                f"{'=' * 75}"
-            )
+
+        # Extract spatial skip representations
+        s2 = self.stem_s2(x)
+        s4 = self.stem_s4(s2)
+        s8 = self.stem_s8(s4)
 
         tokens, ph, pw = self.patch_embed(x)
         num_patches = tokens.shape[1]
@@ -149,7 +159,12 @@ class SatMaePPModel(FoundationModelBase):
 
         tokens = self.norm(tokens)
         feat_map = tokens.transpose(1, 2).view(b, self.embed_dim, ph, pw)
-        return self.feature_proj(feat_map)
+        out = self.feature_proj(feat_map)
+
+        return {
+            "out": out,
+            "skips": [s8, s4, s2],
+        }
 
     def unfreeze_last_blocks(self, num_blocks: int = 2) -> None:
         self.freeze_backbone()

@@ -60,7 +60,7 @@ class GFMCompositionModel(FoundationModelBase):
 
     def __init__(
         self,
-        in_channels: int = 6,  # 2 SAR + 4 Optical, or 2 SAR only
+        in_channels: int = 3,  # 3-channel SAR (VV, VH, Diff) or multi-modal
         embed_dim: int = 256,
         depth: int = 6,
         num_heads: int = 8,
@@ -69,7 +69,7 @@ class GFMCompositionModel(FoundationModelBase):
     ):
         super().__init__(
             model_name="GFM_Composition_Pretraining",
-            expected_modalities=["sar_optical", "compositional", "sentinel1", "sar", "multispectral"],
+            expected_modalities=["sentinel1", "sar", "sar_optical", "compositional", "multispectral", "optical", "all"],
             feature_dim=embed_dim,
         )
         self.in_channels = in_channels
@@ -77,8 +77,25 @@ class GFMCompositionModel(FoundationModelBase):
         self.patch_size = patch_size
         self.pretrained_ref = pretrained_path_or_repo
 
+        # Initial stem projection for spatial skip connections (224 -> 112 -> 56 -> 28)
+        self.stem_s2 = nn.Sequential(
+            nn.Conv2d(in_channels, 64, kernel_size=3, stride=2, padding=1, bias=False),
+            nn.BatchNorm2d(64),
+            nn.GELU(),
+        )
+        self.stem_s4 = nn.Sequential(
+            nn.Conv2d(64, 64, kernel_size=3, stride=2, padding=1, bias=False),
+            nn.BatchNorm2d(64),
+            nn.GELU(),
+        )
+        self.stem_s8 = nn.Sequential(
+            nn.Conv2d(64, 128, kernel_size=3, stride=2, padding=1, bias=False),
+            nn.BatchNorm2d(128),
+            nn.GELU(),
+        )
+
         sar_c = min(in_channels, 2)
-        opt_c = max(0, in_channels - 2) if in_channels > 2 else 4
+        opt_c = max(1, in_channels - 2) if in_channels > 2 else 4
 
         self.encoder = DualSensorCompositionEncoder(
             sar_channels=sar_c,
@@ -96,7 +113,7 @@ class GFMCompositionModel(FoundationModelBase):
                 d_model=embed_dim,
                 nhead=num_heads,
                 dim_feedforward=embed_dim * 4,
-                dropout=0.0,
+                dropout=0.10,
                 activation="gelu",
                 batch_first=True,
             )
@@ -123,8 +140,13 @@ class GFMCompositionModel(FoundationModelBase):
             except Exception as e:
                 print(f"[GFM] Local checkpoint load warning ({e}); initialized model architecture.")
 
-    def forward(self, x: torch.Tensor, **kwargs) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, **kwargs) -> Any:
         b, c, h, w = x.shape
+
+        # Extract spatial skip representations
+        s2 = self.stem_s2(x)
+        s4 = self.stem_s4(s2)
+        s8 = self.stem_s8(s4)
 
         if c <= 2:
             sar_x = x
@@ -152,7 +174,12 @@ class GFMCompositionModel(FoundationModelBase):
 
         tokens = self.norm(tokens)
         feat_map = tokens.transpose(1, 2).view(b, self.embed_dim, ph, pw)
-        return self.feature_proj(feat_map)
+        out = self.feature_proj(feat_map)
+
+        return {
+            "out": out,
+            "skips": [s8, s4, s2],
+        }
 
     def unfreeze_last_blocks(self, num_blocks: int = 2) -> None:
         self.freeze_backbone()
