@@ -6,6 +6,7 @@
     python dev.py frontend               desktop UI only (Avalonia)
     python dev.py frontend --ui=tauri    desktop UI only (experimental Rust/Tauri)
     python dev.py sidecar                analysis daemon only, for API poking
+    python dev.py bundle                 build the universal bundle (both frontends together)
     python dev.py stop                   stop the backend
 
 Starts the Docker engine itself if it is not already answering. Standard library
@@ -14,6 +15,7 @@ only, so it needs nothing beyond the Python that already builds this repo.
 from __future__ import annotations
 
 import argparse
+import platform
 import platform
 import shutil
 import subprocess
@@ -26,6 +28,7 @@ UI_PROJECT = ROOT / "Desktop_App" / "Upgrahan2" / "src" / "GeoSemanticSat.UI" / 
 DAEMON_PROJECT = ROOT / "Desktop_App" / "Upgrahan2" / "src" / "GeoSemanticSat.Daemon" / "GeoSemanticSat.Daemon.csproj"
 TAURI_APP = ROOT / "Desktop_App" / "UpgrahanRust"
 SAMPLE_RASTER = ROOT / "data" / "sample_before.tif"
+BUNDLE_DIR = ROOT / "dist" / "universal"
 ENGINE_TIMEOUT_SECONDS = 180
 
 
@@ -171,6 +174,77 @@ def start_frontend(ui: str = "avalonia") -> None:
     run(["dotnet", "run", "--project", str(UI_PROJECT)])
 
 
+def build_bundle() -> None:
+    """
+    Assembles the universal bundle locally: both frontends and the shared analysis daemon
+    in one directory.
+
+    Co-location is the whole point. Each frontend looks for its sibling next to its own
+    executable and only offers the switch control when it finds one, so the switch simply
+    does not appear unless all three are here. This mirrors what the release workflow's
+    build-universal job produces.
+    """
+    require("dotnet", "Install the .NET 10 SDK.")
+    require("cargo", "Install Rust: https://rustup.rs")
+    require("npm", "Install Node.js 20 or newer.")
+
+    rid = {
+        "win32": "win-x64",
+        "darwin": "osx-arm64" if platform.machine() in ("arm64", "aarch64") else "osx-x64",
+    }.get(sys.platform, "linux-x64")
+
+    BUNDLE_DIR.mkdir(parents=True, exist_ok=True)
+
+    say(f"Universal bundle -> {BUNDLE_DIR}  ({rid})")
+
+    say("1/4  Avalonia frontend")
+    run(["dotnet", "publish", str(UI_PROJECT), "-c", "Release", "-r", rid,
+         "--self-contained", "true", "-o", str(BUNDLE_DIR), "--nologo",
+         "--nowarn:NU1903,NU1902,NU1904"])
+
+    say("2/4  Analysis daemon")
+    run(["dotnet", "publish", str(DAEMON_PROJECT), "-c", "Release", "-r", rid,
+         "--self-contained", "true", "-o", str(BUNDLE_DIR), "--nologo",
+         "--nowarn:NU1903,NU1902,NU1904"])
+
+    say("3/4  Tauri frontend")
+    if not (TAURI_APP / "node_modules").is_dir():
+        run(["npm", "install", "--no-audit", "--no-fund"], cwd=TAURI_APP)
+    run(["npm", "run", "build"], cwd=TAURI_APP)
+    # A debug build is enough to exercise the switch and is far quicker than a full
+    # release bundle; use `npm run desktop:build` when you want the shippable one.
+    run(["cargo", "build"], cwd=TAURI_APP / "src-tauri")
+
+    exe = ".exe" if sys.platform == "win32" else ""
+    tauri_binary = TAURI_APP / "src-tauri" / "target" / "debug" / f"upgrahan-rust{exe}"
+    if not tauri_binary.is_file():
+        raise LauncherError(f"Tauri binary not found at {tauri_binary}.")
+    shutil.copy2(tauri_binary, BUNDLE_DIR / tauri_binary.name)
+
+    say("4/4  Checking the bundle can actually switch")
+    required = [f"GeoSemanticSat.UI{exe}", f"upgrahan-rust{exe}", f"gss-daemon{exe}"]
+    missing = [name for name in required if not (BUNDLE_DIR / name).is_file()]
+    if missing:
+        raise LauncherError(
+            "The bundle cannot switch frontends - missing: " + ", ".join(missing))
+
+    print(f"""
+    Ready. Both frontends and the daemon are in:
+      {BUNDLE_DIR}
+
+    Start either one:
+      {BUNDLE_DIR / required[0]}
+      {BUNDLE_DIR / required[1]}
+
+    Avalonia  -> click "Rust UI" in its header.
+    Tauri     -> click "Avalonia UI" in its header; a five-second countdown runs,
+                 and Cancel is on screen for the whole of it.
+
+    The control is absent unless all three files are present, which is why it does
+    not appear when you run either frontend from its own build directory.
+    """, flush=True)
+
+
 def start_sidecar() -> None:
     """Runs the analysis daemon on its own, for poking at the API with curl."""
     build_daemon()
@@ -192,7 +266,7 @@ def main() -> int:
         "target",
         nargs="?",
         default="all",
-        choices=["all", "backend", "frontend", "sidecar", "stop"],
+        choices=["all", "backend", "frontend", "sidecar", "bundle", "stop"],
         help="what to launch (default: all)",
     )
     parser.add_argument(
@@ -210,6 +284,7 @@ def main() -> int:
         "backend": [start_backend],
         "frontend": [frontend],
         "sidecar": [start_sidecar],
+        "bundle": [build_bundle],
         "stop": [stop_backend],
         "all": [start_backend, frontend],
     }

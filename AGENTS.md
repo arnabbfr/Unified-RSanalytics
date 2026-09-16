@@ -65,6 +65,9 @@ python dev.py backend                # backend only
 python dev.py frontend               # desktop UI only (Avalonia, the default)
 python dev.py frontend --ui=tauri    # desktop UI only (experimental Rust/Tauri)
 python dev.py sidecar                # analysis daemon alone, for poking the API with curl
+python dev.py bundle                 # both frontends + the daemon in dist/universal, so the
+                                     # switch control appears (it is hidden unless the sibling
+                                     # build sits next to the running one)
 python dev.py stop                   # docker compose down
 ```
 
