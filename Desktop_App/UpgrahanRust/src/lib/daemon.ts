@@ -187,14 +187,30 @@ const messageOf = (e: unknown) => (e instanceof Error ? e.message : String(e));
  */
 let onDaemonRestarted: (() => void) | undefined;
 
-export function setDaemonRestartHandler(handler: () => void) {
+export function setDaemonRestartHandler(handler: () => void | Promise<void>) {
   onDaemonRestarted = handler;
 }
 
-/** Starts the daemon (idempotent) and caches where to reach it. */
-export async function connect(): Promise<Endpoint> {
-  if (endpoint) return endpoint;
+/**
+ * In-flight connection, so concurrent callers share one start_daemon invocation.
+ *
+ * Caching only the resolved endpoint is not enough: boot() leaves the titlebar live, so
+ * Benchmark or Load GeoTIFF can call in while the first connect is still awaiting. Each
+ * would then invoke start_daemon, and the supervisor has no whole-start lock - which can
+ * orphan one daemon and leave the client talking to the other.
+ */
+let connecting: Promise<Endpoint> | null = null;
 
+/** Starts the daemon (idempotent) and caches where to reach it. */
+export function connect(): Promise<Endpoint> {
+  if (endpoint) return Promise.resolve(endpoint);
+  connecting ??= openConnection().finally(() => {
+    connecting = null;
+  });
+  return connecting;
+}
+
+async function openConnection(): Promise<Endpoint> {
   const resolved = await invoke<Endpoint>("start_daemon");
 
   // Fail loudly on a malformed endpoint. Without this a missing baseUrl produces a
@@ -244,7 +260,9 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       // which reads as "nothing matched" rather than "the engine restarted". Re-seed it
       // before retrying, and let the app know so it can refresh what it is showing.
       await attempt("/session/init", { method: "POST" });
-      onDaemonRestarted?.();
+      // Awaited: the handler reloads the session, and the retry below would otherwise
+      // return data the UI has not reconciled with the freshly initialized daemon.
+      await onDaemonRestarted?.();
 
       response = await attempt(path, init);
     } catch (e) {
@@ -308,7 +326,10 @@ export const api = {
     post<ChangeSearchResult[]>("/change/search", body),
 
   // clustering
-  cluster: (epsilonCosine = 0.22, minPoints = 2, maxDistanceKm = 50) =>
+  // 0.25 is Avalonia's value (MainWindow.axaml.cs OnRunClusteringClicked). It sets DBSCAN
+  // membership, so a different default here means the two frontends group the same archive
+  // differently - exactly the divergence this project exists to rule out.
+  cluster: (epsilonCosine = 0.25, minPoints = 2, maxDistanceKm = 50) =>
     post<Cluster[]>("/cluster", { epsilonCosine, minPoints, maxDistanceKm }),
 
   // review

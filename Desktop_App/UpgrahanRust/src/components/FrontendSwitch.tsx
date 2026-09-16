@@ -16,10 +16,13 @@ import { Button } from "~/components/Button";
  * "already happened" while the window is still sitting there.
  */
 
+// Nothing crosses the process boundary but the preference file: the Avalonia build runs its
+// own analysis in-process and the replacement daemon starts on a fresh session. Promising
+// that the archive and verdicts survive would be a straight lie, so this says the opposite.
 const SWITCH_SENTENCES = [
   "Switching to the Avalonia build.",
   "Same analysis engine, a different interface over it.",
-  "Your loaded archive and verdicts stay where they are.",
+  "It starts fresh - export anything you need to keep first.",
   "You can switch back from its View menu.",
 ];
 

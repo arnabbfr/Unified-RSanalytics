@@ -31,7 +31,7 @@ const styles = cva(
           "text-ed-text-2 hover:bg-ed-ctl-hover hover:text-ed-text-1 disabled:text-ed-text-3",
         /* Reserved for the single primary action on a screen, as Cap reserves radialblue. */
         verify:
-          "text-white border-0 [background:radial-gradient(90%_100%_at_15%_12%,#4fd1a5_0%,#1fa97c_100%)] shadow-[0_0_0_1px] shadow-emerald-9 hover:opacity-90 disabled:opacity-50",
+          "text-white border-0 [background:radial-gradient(90%_100%_at_15%_12%,var(--ed-verify-from)_0%,var(--ed-verify-to)_100%)] shadow-[0_0_0_1px] shadow-emerald-9 hover:opacity-90 disabled:opacity-50",
       },
       size: {
         xs: "text-[11px] px-2 h-5",

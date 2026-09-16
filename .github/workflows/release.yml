@@ -282,14 +282,27 @@ jobs:
 
           if [ "${{ matrix.os }}" = "windows-latest" ]; then
             cp "$BIN_DIR/upgrahan-rust.exe" staging/UpaGraha.exe
+            cp -r daemon-dist/. staging/
           elif [ "${{ matrix.os }}" = "macos-latest" ]; then
-            cp -R "$BIN_DIR/bundle/macos/UpaGraha.app" staging/ 2>/dev/null || cp "$BIN_DIR/upgrahan-rust" staging/UpaGraha
+            if cp -R "$BIN_DIR/bundle/macos/UpaGraha.app" staging/ 2>/dev/null; then
+              # locate_daemon looks beside current_exe, and inside a .app that is
+              # Contents/MacOS - NOT the directory holding the .app. Copying the daemon to
+              # the archive root instead would ship a macOS build that cannot start its
+              # analysis engine at all.
+              cp -r daemon-dist/. "staging/UpaGraha.app/Contents/MacOS/"
+            else
+              cp "$BIN_DIR/upgrahan-rust" staging/UpaGraha
+              chmod +x staging/UpaGraha
+              cp -r daemon-dist/. staging/
+            fi
           else
             cp "$BIN_DIR/upgrahan-rust" staging/UpaGraha
             chmod +x staging/UpaGraha
+            cp -r daemon-dist/. staging/
           fi
 
-          cp -r daemon-dist/. staging/
+          # The daemon is useless if it is not executable after the archive round-trip.
+          find staging -name 'gss-daemon' -exec chmod +x {} + 2>/dev/null || true
 
           if [ "${{ matrix.os }}" = "windows-latest" ]; then
             7z a -tzip "dist/artifacts/GeoSemanticSat-Tauri-${{ matrix.rid }}.zip" ./staging/*

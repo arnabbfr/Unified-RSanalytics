@@ -171,7 +171,10 @@ app.MapPost("/search/similar", (AnalysisSession s, Contracts.SimilarSearchReques
     return Results.Ok(s.SearchSimilar(req));
 });
 app.MapPost("/search/feedback", (AnalysisSession s, Contracts.FeedbackSearchRequest req) =>
-    Results.Ok(s.SearchWithFeedback(req)));
+{
+    req.Validate();
+    return Results.Ok(s.SearchWithFeedback(req));
+});
 app.MapGet("/search/explain", (string q) =>
     Results.Ok(new { explanation = AnalysisSession.ExplainQuery(q) }));
 

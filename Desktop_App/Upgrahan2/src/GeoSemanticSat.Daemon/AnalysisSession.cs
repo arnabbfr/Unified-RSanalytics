@@ -42,6 +42,14 @@ public sealed class AnalysisSession
     private List<SatelliteTile> _timeSeries = new();
     private List<ChangeRecord> _candidates = new();
 
+    // The exact pair the current candidates were derived from. Resolving this by timestamp
+    // against _timeSeries instead only works while the archive is the synthetic one: a tile
+    // from LoadGeoTiff lives in _tiles and never enters _timeSeries, so the lookup missed and
+    // silently fell back to the synthetic first/last scenes. Every evidence image then showed
+    // different imagery from the pair that actually produced the candidate.
+    private SatelliteTile? _detectedT1;
+    private SatelliteTile? _detectedT2;
+
     /// <summary>Matches the UI's threshold for calling a candidate high-confidence.</summary>
     public const double HighConfidenceThreshold = 0.85;
 
@@ -72,6 +80,7 @@ public sealed class AnalysisSession
             Engine.IngestTile(t3, patchSize: 32);
 
             _candidates = MultiTemporalChangeDetector.DetectChanges(t1, t3);
+            (_detectedT1, _detectedT2) = (t1, t3);
             ResolveOnsets(t1, t3);
 
             _changeSearch.AddRange(_candidates);
@@ -106,6 +115,7 @@ public sealed class AnalysisSession
             Engine.IngestTile(t3, patchSize: 32);
 
             _candidates = MultiTemporalChangeDetector.DetectChanges(t1, t3);
+            (_detectedT1, _detectedT2) = (t1, t3);
             ResolveOnsets(t1, t3);
 
             _changeSearch.AddRange(_candidates);
@@ -205,6 +215,7 @@ public sealed class AnalysisSession
             var t2 = RequireTile(req.T2Handle);
 
             _candidates = MultiTemporalChangeDetector.DetectChanges(t1, t2, req.ToOptions());
+            (_detectedT1, _detectedT2) = (t1, t2);
             ResolveOnsets(t1, t2);
 
             _changeSearch = new ChangeSearchEngine();
@@ -286,12 +297,7 @@ public sealed class AnalysisSession
             var record = _candidates.FirstOrDefault(c => c.Id == changeId)
                 ?? throw new KeyNotFoundException($"Unknown candidate '{changeId}'.");
 
-            // The pair the candidate was actually derived from, by timestamp.
-            var t1 = _timeSeries.FirstOrDefault(t => t.AcquisitionTimestamp == record.TimestampT1)
-                     ?? _timeSeries.First();
-            var t2 = _timeSeries.FirstOrDefault(t => t.AcquisitionTimestamp == record.TimestampT2)
-                     ?? _timeSeries.Last();
-
+            var (t1, t2) = RequireDetectionPair();
             return fn(t1, t2, record);
         }
     }
@@ -300,13 +306,21 @@ public sealed class AnalysisSession
     {
         lock (_lock)
         {
-            var t1 = _timeSeries.Count > 0 ? _timeSeries[0] : throw new InvalidOperationException("No archive loaded.");
-            var t2 = _timeSeries.Count > 2 ? _timeSeries[2] : _timeSeries[^1];
+            var (t1, t2) = RequireDetectionPair();
             return fn(t1, t2, _candidates);
         }
     }
 
     // ---- internals ----
+
+    /// <summary>
+    /// The pair the current candidates came from. Both are set together whenever detection
+    /// runs, so either being null means nothing has been detected yet.
+    /// </summary>
+    private (SatelliteTile T1, SatelliteTile T2) RequireDetectionPair() =>
+        _detectedT1 is { } t1 && _detectedT2 is { } t2
+            ? (t1, t2)
+            : throw new InvalidOperationException("No change detection has been run yet.");
 
     private SatelliteTile RequireTile(string handle) =>
         _tiles.TryGetValue(handle, out var tile)

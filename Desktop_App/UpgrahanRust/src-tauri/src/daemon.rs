@@ -12,7 +12,8 @@ use std::collections::VecDeque;
 use std::io::{BufRead, BufReader, Read};
 use std::path::PathBuf;
 use std::process::{Child, ChildStderr, Command, Stdio};
-use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -194,19 +195,68 @@ pub fn start(state: &DaemonState) -> Result<DaemonEndpoint, String> {
         drain::<ChildStderr>(stderr, Some(Arc::clone(&state.stderr_tail)));
     }
 
+    // The handshake is read on a worker so the timeout can actually fire. Checking elapsed
+    // time before a blocking read_line only catches a daemon that DIED - one that is alive
+    // but never prints the line leaves read_line blocked forever and the UI waiting on it
+    // with no error. recv_timeout puts the deadline on receiving instead of on reading.
+    //
+    // The same thread goes on to drain stdout after the handshake, because letting the
+    // reader drop would close the pipe and kill the daemon on its next write.
+    enum Stdout {
+        Line(String),
+        Closed,
+        Failed(String),
+    }
+
+    let (tx, rx) = mpsc::channel::<Stdout>();
+    let handshake_done = Arc::new(AtomicBool::new(false));
+    let reader_done = Arc::clone(&handshake_done);
+
+    thread::spawn(move || {
+        let mut reader = BufReader::new(stdout);
+        let mut line = String::new();
+        loop {
+            line.clear();
+            // Once the handshake is in, nobody is receiving: keep reading to drain the pipe
+            // but stop sending, or the channel grows for the life of the process.
+            let sending = !reader_done.load(Ordering::Relaxed);
+            match reader.read_line(&mut line) {
+                Ok(0) => {
+                    if sending {
+                        let _ = tx.send(Stdout::Closed);
+                    }
+                    return;
+                }
+                Ok(_) => {
+                    if sending {
+                        let _ = tx.send(Stdout::Line(line.clone()));
+                    }
+                }
+                Err(e) => {
+                    if sending {
+                        let _ = tx.send(Stdout::Failed(e.to_string()));
+                    }
+                    return;
+                }
+            }
+        }
+    });
+
     let started = Instant::now();
-    let mut reader = BufReader::new(stdout);
-    let mut line = String::new();
 
     let handshake = loop {
-        if started.elapsed() > HANDSHAKE_TIMEOUT {
-            let _ = child.kill();
-            return Err("The analysis daemon did not report a port within 60 seconds.".into());
-        }
+        let remaining = HANDSHAKE_TIMEOUT
+            .checked_sub(started.elapsed())
+            .unwrap_or_default();
 
-        line.clear();
-        match reader.read_line(&mut line) {
-            Ok(0) => {
+        match rx.recv_timeout(remaining) {
+            Ok(Stdout::Line(line)) => {
+                if let Ok(parsed) = serde_json::from_str::<Handshake>(line.trim()) {
+                    break parsed;
+                }
+                // Not the handshake line; keep waiting.
+            }
+            Ok(Stdout::Closed) => {
                 // stdout closed before the handshake: the daemon died on startup.
                 let _ = child.kill();
                 let said = state.last_output();
@@ -217,28 +267,23 @@ pub fn start(state: &DaemonState) -> Result<DaemonEndpoint, String> {
 {said}")
                 });
             }
-            Ok(_) => {
-                if let Ok(parsed) = serde_json::from_str::<Handshake>(line.trim()) {
-                    break parsed;
-                }
-                // Not the handshake line; keep reading.
-            }
-            Err(e) => {
+            Ok(Stdout::Failed(e)) => {
                 let _ = child.kill();
                 return Err(format!("Failed reading the daemon handshake: {e}"));
             }
+            Err(_) => {
+                let _ = child.kill();
+                return Err("The analysis daemon did not report a port within 60 seconds.".into());
+            }
         }
     };
+
+    handshake_done.store(true, Ordering::Relaxed);
 
     let endpoint = DaemonEndpoint {
         base_url: format!("http://127.0.0.1:{}", handshake.port),
         token: handshake.token,
     };
-
-    // Hand the reader to a drain thread rather than letting it drop here. Dropping it
-    // closes the read end, and the daemon's next write to stdout then fails - which is
-    // how it came to die silently mid-session.
-    drain(reader, None);
 
     if let Ok(mut guard) = state.child.lock() {
         *guard = Some(child);

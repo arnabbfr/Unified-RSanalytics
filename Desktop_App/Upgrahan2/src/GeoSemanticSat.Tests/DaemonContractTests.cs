@@ -117,6 +117,74 @@ public class DaemonContractTests
         Assert.Throws<KeyNotFoundException>(() => session.WithCandidate("nope", (a, b, c) => 0));
     }
 
+    /// <summary>
+    /// Evidence imagery must come from the pair detection actually ran on.
+    ///
+    /// These used to be resolved by matching the record's timestamps against _timeSeries.
+    /// That silently works for the synthetic archive and silently fails for anything else:
+    /// a tile from LoadGeoTiff lives in _tiles and never enters _timeSeries, so the match
+    /// missed and fell through to the synthetic first/last scenes. The analyst then reviewed
+    /// a candidate against imagery it was never derived from.
+    /// </summary>
+    [Fact]
+    public void EvidenceImagery_ComesFromTheDetectedPair_NotTheArchiveEnds()
+    {
+        string tempFile = Path.Combine(Path.GetTempPath(), $"gss_detect_pair_{Guid.NewGuid():N}.tif");
+        try
+        {
+            var session = new AnalysisSession();
+            var status = session.Initialize();
+            string t1Handle = status.Tiles[0].Handle;
+
+            // A tile from outside the synthetic series: this is the case the old timestamp
+            // lookup could not resolve. It is the archive's own final scene round-tripped
+            // through a file, so detection against the baseline finds real candidates.
+            var source = SyntheticScene.BuildDemoArchive()[^1];
+            var bands = source.Bands.Keys.ToList();
+            GeoTiffWriter.WriteGeoTiff(tempFile, source, bands);
+            string t2Handle = session.LoadGeoTiff(tempFile).Handle;
+            Assert.DoesNotContain(status.Tiles, t => t.Handle == t2Handle);
+
+            string expectedT1 = session.WithTile(t1Handle, t => t.TileId);
+            string expectedT2 = session.WithTile(t2Handle, t => t.TileId);
+
+            var detected = session.DetectChanges(new Contracts.DetectRequest(t1Handle, t2Handle));
+            Assert.NotEmpty(detected);
+
+            var pair = session.WithCandidate(detected[0].Id, (a, b, _) => (T1: a.TileId, T2: b.TileId));
+            Assert.Equal(expectedT1, pair.T1);
+            Assert.Equal(expectedT2, pair.T2);
+
+            // The heatmap is evidence for the same candidates, so it must agree. It used to
+            // render _timeSeries[0] and [2] unconditionally.
+            var heatmap = session.WithHeatmapContext((a, b, _) => (T1: a.TileId, T2: b.TileId));
+            Assert.Equal(expectedT1, heatmap.T1);
+            Assert.Equal(expectedT2, heatmap.T2);
+        }
+        finally
+        {
+            if (File.Exists(tempFile)) File.Delete(tempFile);
+        }
+    }
+
+    /// <summary>A flagged candidate must not export as one nobody looked at.</summary>
+    [Fact]
+    public void FlagWithoutNotes_IsStillDistinguishableFromUnreviewed()
+    {
+        var session = new AnalysisSession();
+        session.Initialize();
+
+        var first = session.Candidates().First();
+        Assert.True(session.Flag(first.Id, ""));
+
+        var item = session.Review().Single(i => i.Record.Id == first.Id);
+        Assert.Equal("Flagged", item.Status);
+        Assert.False(item.Record.ConfirmedByAnalyst);
+        Assert.False(item.Record.RejectedByAnalyst);
+        // The record is all the GeoJSON export carries, so the outcome has to live on it.
+        Assert.False(string.IsNullOrWhiteSpace(item.Record.AnalystNotes));
+    }
+
     [Fact]
     public void Verdicts_MoveCandidatesOutOfPending()
     {

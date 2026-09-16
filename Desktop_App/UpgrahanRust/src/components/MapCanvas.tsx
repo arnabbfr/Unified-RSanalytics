@@ -46,7 +46,7 @@ interface TileProvider {
   regionLimited: boolean;
 }
 
-const DEFAULT_PROVIDER_ID = "EsriSatellite";
+const DEFAULT_PROVIDER_ID = "esri-satellite";
 
 function cssVar(name: string, fallback: string): string {
   if (typeof document === "undefined") return fallback;

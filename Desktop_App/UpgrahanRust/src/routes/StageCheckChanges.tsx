@@ -32,15 +32,20 @@ import {
   api,
   bmpDataUrl,
   type ChangeRecord,
+  type ReviewItem,
   type ReviewStatus,
   type TileInfo,
   type VisualRenderMode,
 } from "~/lib/daemon";
 import { useApp } from "~/lib/store";
 
-// ponytail: no UI exposed for these two knobs - fixed, sane defaults. Add controls if analysts ask.
-const PATCH_SIZE = 64;
-const MIN_CONFIDENCE = 0.35;
+// ponytail: no UI exposed for these two knobs - fixed defaults. Add controls if analysts ask.
+// The values are Avalonia's (MainWindow.axaml.cs OnRerunDetectionClicked), not a local
+// choice: patch size sets the detection grid and min confidence sets what is admitted as a
+// candidate, so differing here would give the two frontends different candidate sets from
+// the same archive.
+const PATCH_SIZE = 16;
+const MIN_CONFIDENCE = 0.65;
 
 const BLINK_INTERVAL_MS = 600;
 
@@ -148,14 +153,22 @@ function PassTimeline(props: {
             return (
               <button
                 type="button"
+                // Selecting the baseline would re-run detection with T1 as its own T2: a
+                // guaranteed no-change pass that wipes the candidate set. It stays visible
+                // because the analyst needs to see WHICH pass is the baseline.
+                disabled={isBaseline()}
                 onClick={() => props.onSelect(tile.handle)}
-                title={isBaseline() ? "Baseline (T1)" : "Compare the baseline against this pass as T2"}
+                title={
+                  isBaseline()
+                    ? "Baseline (T1) - every other pass is compared against this one"
+                    : "Compare the baseline against this pass as T2"
+                }
                 class={cn(
                   "rounded-full border px-2.5 py-1 font-mono text-[11px] tabular-nums transition-colors duration-200",
                   isSelectedT2()
                     ? "border-ed-accent bg-ed-accent text-white"
                     : isBaseline()
-                      ? "border-ed-accent/40 text-ed-accent"
+                      ? "cursor-default border-ed-accent/40 text-ed-accent"
                       : "border-ed-line text-ed-text-2 hover:bg-ed-ctl-hover",
                 )}
               >
@@ -173,14 +186,28 @@ function PassTimeline(props: {
   );
 }
 
-/** Confirmed/Rejected/Pending, derived from the two flags a ChangeRecord actually carries. */
-function candidateStatus(record: ChangeRecord): ReviewStatus {
+/**
+ * The analyst's verdict on a candidate.
+ *
+ * The review queue is authoritative, not the record's two booleans: Flagged deliberately
+ * asserts neither confirmed nor rejected, so deriving from the booleans alone rendered a
+ * freshly flagged candidate as "Pending" - indistinguishable from one nobody had looked at.
+ * The booleans are the fallback for a record that predates the queue entry.
+ */
+function candidateStatus(record: ChangeRecord, review: ReviewItem[]): ReviewStatus {
+  const item = review.find((i) => i.record.id === record.id);
+  if (item) return item.status;
   if (record.confirmedByAnalyst) return "Confirmed";
   if (record.rejectedByAnalyst) return "Rejected";
   return "Pending";
 }
 
-function CandidateRow(props: { record: ChangeRecord; selected: boolean; onSelect: () => void }) {
+function CandidateRow(props: {
+  record: ChangeRecord;
+  review: ReviewItem[];
+  selected: boolean;
+  onSelect: () => void;
+}) {
   return (
     <button
       type="button"
@@ -192,7 +219,7 @@ function CandidateRow(props: { record: ChangeRecord; selected: boolean; onSelect
     >
       <div class="flex items-center justify-between gap-2">
         <ChangeTypeChip type={props.record.type} />
-        <StatusBadge status={candidateStatus(props.record)} />
+        <StatusBadge status={candidateStatus(props.record, props.review)} />
       </div>
       <EvidenceScore value={props.record.confidence} />
       <p class="text-[11px] text-ed-text-3">
@@ -307,6 +334,9 @@ function CandidateInspector(props: { record: ChangeRecord }) {
 
   const rerun = () =>
     actions.detect({
+      // Without this the store falls back to tiles[2], so changing a detection option after
+      // picking a pass quietly re-ran against a different T2 than the timeline showed.
+      t2Handle: t2Handle(),
       enableRadiometricNormalization: enableRadiometricNormalization(),
       enableQualityMasking: enableQualityMasking(),
       enableJitterSuppression: enableJitterSuppression(),
@@ -746,6 +776,7 @@ export function StageCheckChanges() {
             {(c) => (
               <CandidateRow
                 record={c}
+                review={state.review}
                 selected={c.id === state.selectedCandidateId}
                 onSelect={() => actions.select(c.id)}
               />

@@ -110,7 +110,7 @@ interface TileProviderInfo {
   urlTemplate: string;
 }
 
-const DEFAULT_PROVIDER_ID = "EsriSatellite";
+const DEFAULT_PROVIDER_ID = "esri-satellite";
 const PRECACHE_ZOOMS = [11, 12, 13, 14];
 const PRECACHE_CONCURRENCY = 4;
 

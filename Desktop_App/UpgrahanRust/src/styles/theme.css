@@ -63,6 +63,11 @@
   --verdict-candidate: #3b9eff;
   --verdict-rejected: #ff9592;
   --verdict-pending: var(--ed-text-2);
+
+  /* Endpoints of the primary ("verify") button gradient. Cap builds its radialblue the same
+     way; these live here rather than inline in the button so the palette stays in one file. */
+  --ed-verify-from: var(--jade-10);
+  --ed-verify-to: var(--jade-9);
 }
 
 :root.dark {

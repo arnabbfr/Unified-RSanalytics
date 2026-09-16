@@ -54,17 +54,20 @@ function ClusterCard(props: {
   cluster: Cluster;
   selected: boolean;
   onSelect: () => void;
-  ref: (el: HTMLDivElement) => void;
+  ref: (el: HTMLButtonElement) => void;
 }) {
   const shown = createMemo(() => props.cluster.members.slice(0, MEMBER_PREVIEW_COUNT));
   const remaining = createMemo(() => props.cluster.members.length - shown().length);
 
   return (
-    <div
+    <button
+      type="button"
       ref={props.ref}
       onClick={props.onSelect}
+      aria-pressed={props.selected}
       class={cn(
-        "flex cursor-pointer flex-col gap-3 overflow-hidden rounded-xl border bg-ed-card p-4 shadow-ed-card transition-colors",
+        "flex w-full cursor-pointer flex-col gap-3 overflow-hidden rounded-xl border bg-ed-card p-4 text-left shadow-ed-card transition-colors",
+        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ed-accent",
         props.selected
           ? "border-ed-accent ring-1 ring-ed-accent"
           : "border-ed-line hover:bg-ed-ctl-hover",
@@ -107,7 +110,7 @@ function ClusterCard(props: {
           <span class="text-[11px] text-ed-text-3">+{remaining()} more</span>
         </Show>
       </div>
-    </div>
+    </button>
   );
 }
 
@@ -129,7 +132,7 @@ export function StageGroupPlaces() {
 
   const [selectedId, setSelectedId] = createSignal<number | null>(null);
   const [focusBounds, setFocusBounds] = createSignal<Bbox | undefined>(undefined);
-  const cardRefs = new Map<number, HTMLDivElement>();
+  const cardRefs = new Map<number, HTMLButtonElement>();
 
   // Refit to the union of every cluster's bounds whenever a fresh set of clusters lands
   // (first grouping pass, or a re-group), clearing whatever was individually selected.

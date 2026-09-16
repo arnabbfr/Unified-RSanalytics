@@ -20,6 +20,9 @@ pub struct TileProvider {
     pub label: &'static str,
     pub url_template: &'static str,
     pub attribution: &'static str,
+    /// Cache file extension. HybridTileService keys this off the provider, so it has to
+    /// agree per provider or the two apps write past each other.
+    pub extension: &'static str,
     /// True when the provider only covers part of the globe, so the UI can say so
     /// instead of silently showing blank tiles outside coverage.
     pub region_limited: bool,
@@ -29,38 +32,45 @@ pub struct TileProvider {
 /// basemaps and share cache directories. Default is ESRI satellite imagery.
 pub const PROVIDERS: &[TileProvider] = &[
     TileProvider {
-        id: "EsriSatellite",
-        label: "ESRI Satellite",
+        id: "esri-satellite",
+        label: "ESRI World Imagery (Satellite)",
         url_template: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
         attribution: "Esri, Maxar, Earthstar Geographics",
+        extension: "png",
         region_limited: false,
     },
     TileProvider {
-        id: "CartoDark",
-        label: "CartoDB Dark Matter",
-        url_template: "https://basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png",
-        attribution: "CARTO, OpenStreetMap contributors",
+        id: "carto-dark",
+        label: "CartoDB Dark Matter (Tactical)",
+        url_template: "https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png",
+        attribution: "(C) OpenStreetMap contributors, (C) CARTO",
+        extension: "png",
         region_limited: false,
     },
     TileProvider {
-        id: "Sentinel2Cloudless",
-        label: "Sentinel-2 Cloudless 2024",
+        id: "sentinel2-cloudless",
+        label: "Sentinel-2 Cloudless 2024 (EOX 10m)",
         url_template: "https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless-2024_3857/default/g/{z}/{y}/{x}.jpg",
-        attribution: "Sentinel-2 cloudless by EOX IT Services",
+        attribution: "EOxCloudless https://cloudless.eox.at by EOX IT Services GmbH (Contains modified Copernicus Sentinel data 2024). CC BY-NC-SA 4.0, non-commercial use only",
+        // EOX serves JPEG, and HybridTileService caches it as .jpg. Writing .png here would
+        // put our copy in a file the Avalonia app never looks for.
+        extension: "jpg",
         region_limited: false,
     },
     TileProvider {
-        id: "OpenStreetMap",
-        label: "OpenStreetMap",
+        id: "osm-standard",
+        label: "OpenStreetMap Standard",
         url_template: "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
-        attribution: "OpenStreetMap contributors",
+        attribution: "(C) OpenStreetMap contributors",
+        extension: "png",
         region_limited: false,
     },
     TileProvider {
-        id: "UsgsTopo",
-        label: "USGS Topo (United States only)",
-        url_template: "https://basemap.nationalmap.gov/arcgis/rest/services/USGSTopo/MapServer/tile/{z}/{y}/{x}",
-        attribution: "USGS The National Map",
+        id: "usgs-imagery",
+        label: "USGS Imagery (United States only)",
+        url_template: "https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/tile/{z}/{y}/{x}",
+        attribution: "USGS The National Map / US Department of the Interior",
+        extension: "png",
         region_limited: true,
     },
 ];
@@ -87,24 +97,24 @@ fn dirs_local_data() -> Option<PathBuf> {
         .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/share")))
 }
 
-fn tile_path(provider: &str, z: u32, x: u32, y: u32) -> Option<PathBuf> {
-    // Reject anything that could escape the cache directory. provider comes from the
-    // frontend, so it is untrusted input even though the UI only ever sends known ids.
-    if provider.is_empty()
-        || provider.contains("..")
-        || provider.contains('/')
-        || provider.contains('\\')
-        || !provider.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
-    {
-        return None;
-    }
+/// The single gate on an untrusted provider id.
+///
+/// An allow-list rather than character filtering: `provider` arrives from the frontend, and
+/// every caller here joins it onto a path. Matching the registry means a traversal attempt
+/// simply is not a provider, and it hands back the extension at the same time - the two
+/// things that have to agree with HybridTileService.
+fn provider_dir(provider: &str) -> Option<(PathBuf, &'static str)> {
+    let known = PROVIDERS.iter().find(|p| p.id == provider)?;
+    Some((cache_root()?.join(known.id), known.extension))
+}
 
-    cache_root().map(|root| {
-        root.join(provider)
-            .join(z.to_string())
+fn tile_path(provider: &str, z: u32, x: u32, y: u32) -> Option<PathBuf> {
+    let (dir, extension) = provider_dir(provider)?;
+    Some(
+        dir.join(z.to_string())
             .join(x.to_string())
-            .join(format!("{y}.png"))
-    })
+            .join(format!("{y}.{extension}")),
+    )
 }
 
 /// Reads a tile from the shared disk cache. Returns None on a miss.
@@ -126,11 +136,13 @@ pub fn write_cached(provider: &str, z: u32, x: u32, y: u32, bytes: &[u8]) -> Res
 
 /// Counts cached tiles for a provider, so the UI can show what is available offline.
 pub fn cached_tile_count(provider: &str) -> usize {
-    let Some(root) = cache_root().map(|r| r.join(provider)) else {
+    // cached_tile_count used to join `provider` straight onto the cache root with no
+    // validation, so this exposed command could be walked out of the cache directory.
+    let Some((root, extension)) = provider_dir(provider) else {
         return 0;
     };
 
-    fn walk(dir: &PathBuf) -> usize {
+    fn walk(dir: &PathBuf, extension: &str) -> usize {
         let Ok(entries) = fs::read_dir(dir) else {
             return 0;
         };
@@ -139,8 +151,8 @@ pub fn cached_tile_count(provider: &str) -> usize {
             .map(|e| {
                 let path = e.path();
                 if path.is_dir() {
-                    walk(&path)
-                } else if path.extension().is_some_and(|x| x == "png") {
+                    walk(&path, extension)
+                } else if path.extension().is_some_and(|x| x == extension) {
                     1
                 } else {
                     0
@@ -149,7 +161,7 @@ pub fn cached_tile_count(provider: &str) -> usize {
             .sum()
     }
 
-    walk(&root)
+    walk(&root, extension)
 }
 
 #[cfg(test)]
@@ -175,15 +187,45 @@ mod tests {
         }
     }
 
-    #[test]
-    fn builds_the_same_layout_hybridtileservice_uses() {
-        let path = tile_path("EsriSatellite", 11, 1502, 852).unwrap();
-        let tail: Vec<_> = path
+    fn tail_of(provider: &str, z: u32, x: u32, y: u32) -> Vec<String> {
+        tile_path(provider, z, x, y)
+            .unwrap()
             .components()
             .rev()
             .take(4)
             .map(|c| c.as_os_str().to_string_lossy().to_string())
-            .collect();
-        assert_eq!(tail, vec!["852.png", "1502", "11", "EsriSatellite"]);
+            .collect()
+    }
+
+    /// The ids and extensions here are a contract with HybridTileService.GetDiskCachePath,
+    /// not a local naming choice: if they drift, the two apps stop sharing precached tiles
+    /// and the offline guarantee quietly only covers whichever app fetched them.
+    #[test]
+    fn builds_the_same_layout_hybridtileservice_uses() {
+        assert_eq!(
+            tail_of("esri-satellite", 11, 1502, 852),
+            vec!["852.png", "1502", "11", "esri-satellite"]
+        );
+        // Sentinel-2 is the one provider Avalonia caches as .jpg.
+        assert_eq!(
+            tail_of("sentinel2-cloudless", 11, 1502, 852),
+            vec!["852.jpg", "1502", "11", "sentinel2-cloudless"]
+        );
+    }
+
+    /// Guards against the registry drifting back to Rust-side names.
+    #[test]
+    fn provider_ids_match_the_avalonia_registry() {
+        let ids: Vec<_> = PROVIDERS.iter().map(|p| p.id).collect();
+        assert_eq!(
+            ids,
+            vec![
+                "esri-satellite",
+                "carto-dark",
+                "sentinel2-cloudless",
+                "osm-standard",
+                "usgs-imagery"
+            ]
+        );
     }
 }

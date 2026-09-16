@@ -263,7 +263,16 @@ function createAppStore() {
       try {
         const session = await api.generateArchiveAt(latitude, longitude);
         const candidates = await api.candidates();
-        setState({ session, candidates, searching: false });
+        // Clusters are derived from the OLD archive and the daemon does not re-run
+        // clustering here, so keeping them would leave Stage 4 showing and counting groups
+        // from the previous location until the analyst happened to re-run it.
+        setState({
+          session,
+          candidates,
+          clusters: [],
+          selectedCandidateId: null,
+          searching: false,
+        });
         await actions.refreshReview();
       } catch (e) {
         setState("searching", false);

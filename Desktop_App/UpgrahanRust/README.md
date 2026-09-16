@@ -37,6 +37,19 @@ npm install
 npm run desktop
 ```
 
+## Packaging
+
+`bundle.active` is `false`, so `tauri build` produces the executable but no installer.
+
+This is deliberate. The app cannot run without `gss-daemon` sitting beside its executable
+(see `locate_daemon` in `src-tauri/src/daemon.rs`), and nothing stages the self-contained
+.NET publish into an nsis/deb/appimage/dmg payload. Those installers therefore produced a UI
+that came up and then failed at session initialization — worse than not shipping one.
+
+The release pipeline ships portable archives that *do* carry the daemon, and `python dev.py
+bundle` assembles the same layout locally. Re-enable bundling together with `externalBin` or
+`resources` wiring for the sidecar, not before.
+
 ## Stack
 
 | Piece | Choice | Why |

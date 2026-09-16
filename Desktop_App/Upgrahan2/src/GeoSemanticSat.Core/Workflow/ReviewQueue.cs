@@ -81,7 +81,13 @@ public class ReviewQueue
             item.Record.ConfirmedByAnalyst = true;
             item.Record.RejectedByAnalyst = false;
             item.AnalystComments = notes;
-            item.Record.AnalystNotes = notes;
+            // Notes are optional, but ReviewItem.Status is the only other Flagged marker and
+            // the GeoJSON export carries ChangeRecord alone. An empty note would therefore
+            // export as an untouched candidate, so record the outcome itself when the analyst
+            // gave no words for it.
+            item.Record.AnalystNotes = string.IsNullOrWhiteSpace(notes)
+                ? "Flagged for review."
+                : notes;
             item.DecisionTimestamp = DateTime.UtcNow;
             return true;
         }
@@ -97,7 +103,13 @@ public class ReviewQueue
             item.Record.ConfirmedByAnalyst = false;
             item.Record.RejectedByAnalyst = true;
             item.AnalystComments = notes;
-            item.Record.AnalystNotes = notes;
+            // Notes are optional, but ReviewItem.Status is the only other Flagged marker and
+            // the GeoJSON export carries ChangeRecord alone. An empty note would therefore
+            // export as an untouched candidate, so record the outcome itself when the analyst
+            // gave no words for it.
+            item.Record.AnalystNotes = string.IsNullOrWhiteSpace(notes)
+                ? "Flagged for review."
+                : notes;
             item.DecisionTimestamp = DateTime.UtcNow;
             return true;
         }
@@ -115,7 +127,13 @@ public class ReviewQueue
             // exported provenance showed a flagged candidate with empty notes and both
             // analyst booleans false - identical to one nobody had looked at. CONTEXT.md is
             // explicit that a recorded outcome is not the same as "not yet reviewed".
-            item.Record.AnalystNotes = notes;
+            // Notes are optional, but ReviewItem.Status is the only other Flagged marker and
+            // the GeoJSON export carries ChangeRecord alone. An empty note would therefore
+            // export as an untouched candidate, so record the outcome itself when the analyst
+            // gave no words for it.
+            item.Record.AnalystNotes = string.IsNullOrWhiteSpace(notes)
+                ? "Flagged for review."
+                : notes;
             // Flagged is "needs another look", so it asserts neither confirmed nor rejected.
             item.Record.ConfirmedByAnalyst = false;
             item.Record.RejectedByAnalyst = false;

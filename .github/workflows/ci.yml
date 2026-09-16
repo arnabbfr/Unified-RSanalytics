@@ -6,12 +6,14 @@ on:
       - main
     paths:
       - 'Desktop_App/Upgrahan2/**'
+      - 'Desktop_App/UpgrahanRust/**'
       - '.github/workflows/ci.yml'
   pull_request:
     branches:
       - main
     paths:
       - 'Desktop_App/Upgrahan2/**'
+      - 'Desktop_App/UpgrahanRust/**'
       - '.github/workflows/ci.yml'
 
 jobs:
@@ -53,3 +55,56 @@ jobs:
 
       - name: Validate Build
         run: dotnet build Desktop_App/Upgrahan2/GeoSemanticSat.slnx -c Release --nowarn:NU1903,NU1902,NU1904
+
+  # The Tauri frontend needs its own gate: the desktop job above is .NET-only, and the
+  # release workflow runs after merge, so without this a Rust-only change reached main
+  # having never been compiled or type-checked.
+  test-and-build-tauri:
+    name: Test & Build Tauri Frontend
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: Desktop_App/UpgrahanRust/package-lock.json
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo Build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: Desktop_App/UpgrahanRust/src-tauri
+
+      # Tauri links against the system webkit/gtk stack on Linux; without these the crate
+      # fails to build for reasons that have nothing to do with the change under test.
+      - name: Install Tauri System Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libsoup-3.0-dev libjavascriptcoregtk-4.1-dev
+
+      - name: Install Frontend Dependencies
+        working-directory: Desktop_App/UpgrahanRust
+        run: npm ci
+
+      - name: Typecheck Frontend
+        working-directory: Desktop_App/UpgrahanRust
+        run: npm run typecheck
+
+      - name: Build Frontend
+        working-directory: Desktop_App/UpgrahanRust
+        run: npm run build
+
+      - name: Run Rust Tests
+        working-directory: Desktop_App/UpgrahanRust/src-tauri
+        run: cargo test --locked
+
+      - name: Validate Rust Build
+        working-directory: Desktop_App/UpgrahanRust/src-tauri
+        run: cargo build --locked

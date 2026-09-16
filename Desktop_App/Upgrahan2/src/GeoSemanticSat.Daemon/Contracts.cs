@@ -204,7 +204,10 @@ public static class Contracts
         string Query,
         IReadOnlyList<string> RelevantPatchIds,
         IReadOnlyList<string> IrrelevantPatchIds,
-        int TopK = 10);
+        int TopK = 10)
+    {
+        public void Validate() => RequirePositiveTopK(TopK);
+    }
 
     public record DetectRequest(
         string T1Handle,
