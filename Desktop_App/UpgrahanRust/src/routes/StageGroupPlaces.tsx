@@ -1,11 +1,29 @@
-import { createMemo, For, Show } from "solid-js";
+import { createEffect, createMemo, createSignal, For, Show } from "solid-js";
 import IconChevronRight from "~icons/lucide/chevron-right";
 import { Button } from "~/components/Button";
-import { Card, EmptyState, formatCoord, Skeleton } from "~/components/ui";
-import type { Cluster } from "~/lib/daemon";
+import { EmptyState, formatCoord, Skeleton } from "~/components/ui";
+import { MapCanvas } from "~/components/MapCanvas";
+import { cn } from "~/lib/cn";
+import type { Bbox, Cluster } from "~/lib/daemon";
 import { useApp } from "~/lib/store";
 
 const MEMBER_PREVIEW_COUNT = 6;
+
+/** Union of every cluster's enclosing bounds, for the initial map fit. */
+function unionBounds(clusters: Cluster[]): Bbox | undefined {
+  if (clusters.length === 0) return undefined;
+  let minLon = Infinity;
+  let minLat = Infinity;
+  let maxLon = -Infinity;
+  let maxLat = -Infinity;
+  for (const c of clusters) {
+    minLon = Math.min(minLon, c.enclosingBounds.minLon);
+    minLat = Math.min(minLat, c.enclosingBounds.minLat);
+    maxLon = Math.max(maxLon, c.enclosingBounds.maxLon);
+    maxLat = Math.max(maxLat, c.enclosingBounds.maxLat);
+  }
+  return { minLon, minLat, maxLon, maxLat };
+}
 
 /**
  * Cohesion bar, written inline rather than reusing <EvidenceScore>: cohesion measures how
@@ -32,12 +50,26 @@ function CohesionBar(props: { value: number }) {
   );
 }
 
-function ClusterCard(props: { cluster: Cluster }) {
+function ClusterCard(props: {
+  cluster: Cluster;
+  selected: boolean;
+  onSelect: () => void;
+  ref: (el: HTMLDivElement) => void;
+}) {
   const shown = createMemo(() => props.cluster.members.slice(0, MEMBER_PREVIEW_COUNT));
   const remaining = createMemo(() => props.cluster.members.length - shown().length);
 
   return (
-    <Card class="flex flex-col gap-3 p-4">
+    <div
+      ref={props.ref}
+      onClick={props.onSelect}
+      class={cn(
+        "flex cursor-pointer flex-col gap-3 overflow-hidden rounded-xl border bg-ed-card p-4 shadow-ed-card transition-colors",
+        props.selected
+          ? "border-ed-accent ring-1 ring-ed-accent"
+          : "border-ed-line hover:bg-ed-ctl-hover",
+      )}
+    >
       <div class="flex items-start justify-between gap-3">
         <div class="flex flex-col gap-0.5">
           <p class="text-[13px] text-ed-text-1">{props.cluster.label}</p>
@@ -75,7 +107,7 @@ function ClusterCard(props: { cluster: Cluster }) {
           <span class="text-[11px] text-ed-text-3">+{remaining()} more</span>
         </Show>
       </div>
-    </Card>
+    </div>
   );
 }
 
@@ -95,6 +127,42 @@ function ClusterCardSkeleton() {
 export function StageGroupPlaces() {
   const [state, actions] = useApp();
 
+  const [selectedId, setSelectedId] = createSignal<number | null>(null);
+  const [focusBounds, setFocusBounds] = createSignal<Bbox | undefined>(undefined);
+  const cardRefs = new Map<number, HTMLDivElement>();
+
+  // Refit to the union of every cluster's bounds whenever a fresh set of clusters lands
+  // (first grouping pass, or a re-group), clearing whatever was individually selected.
+  let fittedClusters: Cluster[] | null = null;
+  createEffect(() => {
+    if (state.clusters.length > 0 && state.clusters !== fittedClusters) {
+      fittedClusters = state.clusters;
+      setFocusBounds(unionBounds(state.clusters));
+      setSelectedId(null);
+    }
+  });
+
+  const markers = createMemo(() =>
+    state.clusters.map((c) => ({
+      id: String(c.clusterId),
+      lat: c.centre.latitude,
+      lon: c.centre.longitude,
+      selected: c.clusterId === selectedId(),
+    })),
+  );
+
+  function selectCard(clusterId: number) {
+    setSelectedId(clusterId);
+    const cluster = state.clusters.find((c) => c.clusterId === clusterId);
+    if (cluster) setFocusBounds(cluster.enclosingBounds);
+  }
+
+  function selectMarker(id: string) {
+    const clusterId = Number(id);
+    setSelectedId(clusterId);
+    cardRefs.get(clusterId)?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }
+
   return (
     <div class="flex h-full min-h-0 flex-col">
       <div class="shrink-0 border-b border-ed-line bg-ed-card-2 px-4 py-3">
@@ -111,18 +179,20 @@ export function StageGroupPlaces() {
         </div>
       </div>
 
-      <div class="min-h-0 flex-1 overflow-y-auto p-4">
-        <Show
-          when={!state.clustering}
-          fallback={
+      <Show
+        when={!state.clustering}
+        fallback={
+          <div class="min-h-0 flex-1 overflow-y-auto p-4">
             <div class="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
               <For each={Array.from({ length: 6 })}>{() => <ClusterCardSkeleton />}</For>
             </div>
-          }
-        >
-          <Show
-            when={state.clusters.length > 0}
-            fallback={
+          </div>
+        }
+      >
+        <Show
+          when={state.clusters.length > 0}
+          fallback={
+            <div class="min-h-0 flex-1 overflow-y-auto p-4">
               <EmptyState
                 title="No groups yet"
                 hint="Run grouping to see which sites cluster together by appearance and location."
@@ -132,14 +202,40 @@ export function StageGroupPlaces() {
                   Group similar places
                 </Button>
               </EmptyState>
-            }
-          >
-            <div class="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
-              <For each={state.clusters}>{(cluster) => <ClusterCard cluster={cluster} />}</For>
             </div>
-          </Show>
+          }
+        >
+          {/*
+           * Two-pane: map fills the main area, cards sit in a fixed 340px sidebar. At 1440px
+           * wide this reads better than a bottom strip - the map is the primary tool for
+           * judging how clusters are spread across the ground, so it should keep full height;
+           * a bottom strip would compress exactly the dimension that matters here, and cards
+           * read fine as a scrollable list at 340px.
+           */}
+          <div class="flex min-h-0 flex-1">
+            <MapCanvas
+              class="flex-1"
+              markers={markers()}
+              bounds={focusBounds()}
+              onMarkerClick={selectMarker}
+            />
+            <div class="w-[340px] shrink-0 overflow-y-auto border-l border-ed-line bg-ed-stage p-3">
+              <div class="flex flex-col gap-3">
+                <For each={state.clusters}>
+                  {(cluster) => (
+                    <ClusterCard
+                      cluster={cluster}
+                      selected={cluster.clusterId === selectedId()}
+                      onSelect={() => selectCard(cluster.clusterId)}
+                      ref={(el) => cardRefs.set(cluster.clusterId, el)}
+                    />
+                  )}
+                </For>
+              </div>
+            </div>
+          </div>
         </Show>
-      </div>
+      </Show>
     </div>
   );
 }

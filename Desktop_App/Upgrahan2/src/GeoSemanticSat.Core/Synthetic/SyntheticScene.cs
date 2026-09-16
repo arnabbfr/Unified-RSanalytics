@@ -173,8 +173,17 @@ public static class SyntheticScene
     /// Returned newest-last. T1 is index 0, T3 (the usual change target) is index 2.
     /// </summary>
     public static List<SatelliteTile> BuildDemoArchive(int sceneW = 256, int sceneH = 256)
+        => BuildArchiveAt(77.2000, 28.6100, sceneW, sceneH);
+
+    /// <summary>
+    /// The same four-scene archive, centred anywhere. Backs the "generate a calibrated AOI
+    /// for this location" recovery path: an analyst who searches outside the loaded coverage
+    /// gets a scene there rather than an empty result they cannot act on.
+    /// </summary>
+    public static List<SatelliteTile> BuildArchiveAt(
+        double originLon, double originLat, int sceneW = 256, int sceneH = 256)
     {
-        var transform = AffineGeoTransform.NorthUp(77.2000, 28.6100, 0.0001, 0.0001);
+        var transform = AffineGeoTransform.NorthUp(originLon, originLat, 0.0001, 0.0001);
 
         SatelliteTile Scene(string id, int month, int day) => CreateTile(
             id,

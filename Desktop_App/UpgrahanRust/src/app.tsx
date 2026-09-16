@@ -1,6 +1,6 @@
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { invoke } from "@tauri-apps/api/core";
-import { open } from "@tauri-apps/plugin-dialog";
+import { open, save } from "@tauri-apps/plugin-dialog";
 import { For, Match, Show, Switch, createSignal, onCleanup, onMount, type JSX } from "solid-js";
 import toast, { Toaster } from "solid-toast";
 import IconX from "~icons/lucide/x";
@@ -12,9 +12,12 @@ import IconCheck from "~icons/lucide/check";
 import IconImport from "~icons/lucide/import";
 import IconCircleHelp from "~icons/lucide/circle-help";
 import IconArrowRight from "~icons/lucide/arrow-right";
+import IconGauge from "~icons/lucide/gauge";
+import IconLoaderCircle from "~icons/lucide/loader-circle";
 
 import { Button } from "~/components/Button";
 import { ErrorNote } from "~/components/ui";
+import { api } from "~/lib/daemon";
 import { cn } from "~/lib/cn";
 import { AppProvider, STAGES, useApp, type StageId } from "~/lib/store";
 import { StageFindImages } from "~/routes/StageFindImages";
@@ -31,26 +34,31 @@ function Titlebar() {
   const [state, actions] = useApp();
   const [canSwitch, setCanSwitch] = createSignal(false);
 
+  const [benchmarking, setBenchmarking] = createSignal(false);
+
+  /** Evaluation suite. Blocks the daemon for a while, so it reports progress and result. */
+  const runBenchmark = async () => {
+    const outputDirectory = await save({
+      title: "Where should the evaluation report go?",
+      defaultPath: "benchmark_results",
+    });
+    if (typeof outputDirectory !== "string") return;
+
+    setBenchmarking(true);
+    const pending = toast.loading("Running the evaluation suite…");
+    try {
+      const { outputDirectory: written } = await api.benchmark(outputDirectory);
+      toast.success(`Evaluation report written to ${written}`, { id: pending });
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e), { id: pending });
+    } finally {
+      setBenchmarking(false);
+    }
+  };
+
   const pickGeoTiff = () =>
     pickGeoTiffWith((path) => actions.loadGeoTiff(path)).catch((e) =>
       toast.error(e instanceof Error ? e.message : String(e)),
-    );
-
-  const showShortcuts = () =>
-    toast(
-      () => (
-        <div class="flex flex-col gap-1">
-          <p class="text-[12px] font-medium text-ed-text-1">Keyboard shortcuts</p>
-          <For each={SHORTCUTS}>
-            {([key, what]) => (
-              <p class="text-[11px] text-ed-text-2">
-                <span class="font-mono text-ed-text-1">{key}</span> — {what}
-              </p>
-            )}
-          </For>
-        </div>
-      ),
-      { duration: 8000 },
     );
 
   onMount(async () => {
@@ -97,6 +105,19 @@ function Titlebar() {
         <Button variant="ghost" size="sm" title="Load a GeoTIFF into the archive (Ctrl+O)" onClick={pickGeoTiff}>
           <IconImport class="size-3.5" />
           Load GeoTIFF
+        </Button>
+
+        <Button
+          variant="ghost"
+          size="sm"
+          disabled={benchmarking()}
+          title="Run the precision/recall evaluation suite and write a report"
+          onClick={() => void runBenchmark()}
+        >
+          <Show when={benchmarking()} fallback={<IconGauge class="size-3.5" />}>
+            <IconLoaderCircle class="size-3.5 animate-spin" />
+          </Show>
+          Benchmark
         </Button>
 
         <Button
@@ -149,12 +170,33 @@ async function pickGeoTiffWith(load: (path: string) => Promise<void>) {
 const SHORTCUTS = [
   ["Ctrl+1 … Ctrl+5", "Jump to a stage"],
   ["Ctrl+O", "Load a GeoTIFF"],
-  ["Ctrl+F", "Focus the search box"],
+  ["Ctrl+F", "Go to search and focus it"],
+  ["Ctrl+W", "Close the window"],
   ["F1", "This list"],
   ["F5", "Re-run the current search"],
-  ["C / R / N", "Confirm, reject, next candidate (stage 3)"],
+  ["C / R", "Confirm or reject the candidate (stage 3)"],
+  ["P / N", "Previous or next candidate (stage 3)"],
   ["Esc", "Dismiss"],
 ] as const;
+
+/** The help toast, shared by the titlebar button and the F1 binding. */
+function showShortcuts() {
+  toast(
+    () => (
+      <div class="flex flex-col gap-1">
+        <p class="text-[12px] font-medium text-ed-text-1">Keyboard shortcuts</p>
+        <For each={SHORTCUTS}>
+          {([key, what]) => (
+            <p class="text-[11px] text-ed-text-2">
+              <span class="font-mono text-ed-text-1">{key}</span> — {what}
+            </p>
+          )}
+        </For>
+      </div>
+    ),
+    { duration: 8000 },
+  );
+}
 
 function WindowButton(props: {
   label: string;
@@ -184,6 +226,20 @@ function WindowButton(props: {
  */
 function StageRail() {
   const [state, actions] = useApp();
+
+  /**
+   * Live count per stage, so the rail shows how much each step has produced rather than
+   * only whether it has been visited. Zero renders as nothing, not as "0" - an empty
+   * badge reads as "nothing here yet" without adding noise to every untouched stage.
+   */
+  const countFor = (stage: StageId): number =>
+    ({
+      1: state.results.filter((r) => r.similarityScore > 0).length,
+      2: state.candidates.length,
+      3: state.candidates.length,
+      4: state.clusters.length,
+      5: state.review.filter((i) => i.status !== "Pending").length,
+    })[stage];
 
   const canAdvance = () => state.stage < 5 && actions.canEnter((state.stage + 1) as StageId);
 
@@ -235,6 +291,17 @@ function StageRail() {
                 </Show>
               </span>
               <span class="hidden sm:inline">{stage.name}</span>
+
+              <Show when={countFor(stage.id) > 0}>
+                <span
+                  class={cn(
+                    "hidden rounded-full px-1.5 text-[10px] font-medium tabular-nums md:inline",
+                    current() ? "bg-white/20 text-white" : "bg-ed-ctl-active text-ed-text-2",
+                  )}
+                >
+                  {countFor(stage.id)}
+                </span>
+              </Show>
             </button>
           );
         }}
@@ -303,9 +370,27 @@ function Shell() {
         }
         if (e.key === "f" || e.key === "F") {
           e.preventDefault();
-          document.querySelector<HTMLInputElement>('input[data-search-input]')?.focus();
+          // Jump to stage 1 first: focusing a search box that is not mounted is a silent
+          // no-op, which is what this did before.
+          actions.setStage(1);
+          queueMicrotask(() =>
+            document.querySelector<HTMLInputElement>("input[data-search-input]")?.focus(),
+          );
           return;
         }
+
+        if (e.key === "w" || e.key === "W") {
+          e.preventDefault();
+          void getCurrentWindow().close();
+          return;
+        }
+      }
+
+      // F1 was advertised in the shortcut list and the help tooltip but never bound.
+      if (e.key === "F1") {
+        e.preventDefault();
+        showShortcuts();
+        return;
       }
 
       if (e.key === "F5" && !typing) {
@@ -323,12 +408,19 @@ function Shell() {
     // Tauri delivers OS file drops as a window event, not an HTML drag event.
     const unlistenDrop = getCurrentWindow().onDragDropEvent((event) => {
       if (event.payload.type !== "drop") return;
-      const scene = event.payload.paths.find((p) => /\.tiff?$/i.test(p));
-      if (!scene) {
+
+      const scenes = event.payload.paths.filter((p) => /\.tiff?$/i.test(p));
+      if (scenes.length === 0) {
         toast.error("Only .tif and .tiff scenes can be loaded.");
         return;
       }
-      void actions.loadGeoTiff(scene);
+
+      // Ingest every dropped scene, sequentially so the index stays consistent. Taking
+      // only the first silently discarded the rest of a multi-file drop.
+      void (async () => {
+        for (const scene of scenes) await actions.loadGeoTiff(scene);
+        if (scenes.length > 1) toast.success(`Loaded ${scenes.length} scenes.`);
+      })();
     });
 
     window.addEventListener("keydown", onKey);
@@ -392,6 +484,27 @@ function StatusBar() {
   const sensors = () =>
     Array.from(new Set((state.session?.tiles ?? []).map((t) => t.platform))).join(", ") || "none";
 
+  /** Ground sampling distance of the loaded scenes, when they agree on one. */
+  const groundSampling = () => {
+    const values = new Set((state.session?.tiles ?? []).map((t) => t.groundSamplingDistanceMeters));
+    return values.size === 1 ? `${[...values][0]}m GSD` : null;
+  };
+
+  // navigator.onLine is the platform's own answer, so there is no polling or probe traffic
+  // to maintain. It reports link state, not reachability - enough to tell an analyst
+  // whether basemap tiles can be fetched at all, which is what the indicator claims.
+  const [online, setOnline] = createSignal(navigator.onLine);
+  onMount(() => {
+    const up = () => setOnline(true);
+    const down = () => setOnline(false);
+    window.addEventListener("online", up);
+    window.addEventListener("offline", down);
+    onCleanup(() => {
+      window.removeEventListener("online", up);
+      window.removeEventListener("offline", down);
+    });
+  });
+
   return (
     <footer class="flex h-7 shrink-0 items-center gap-4 border-t border-ed-line bg-ed-card px-3 text-[11px] text-ed-text-3">
       <span>{state.session?.indexedPatches ?? 0} indexed</span>
@@ -407,6 +520,31 @@ function StatusBar() {
       <div class="flex-1" />
 
       <span class="truncate">{sensors()}</span>
+      <Show when={groundSampling()}>
+        {(gsd) => (
+          <>
+            <span class="text-ed-line-strong">·</span>
+            <span>{gsd()}</span>
+          </>
+        )}
+      </Show>
+      <span class="text-ed-line-strong">·</span>
+      <span
+        class="flex items-center gap-1.5"
+        title={
+          online()
+            ? "Network is reachable, so basemap tiles can be fetched."
+            : "No network. Analysis is unaffected - it runs locally - but basemaps render from the tile cache only."
+        }
+      >
+        <span
+          class={cn(
+            "size-1.5 rounded-full",
+            online() ? "bg-verdict-verified" : "bg-ed-text-3",
+          )}
+        />
+        {online() ? "Online" : "Air-gapped"}
+      </span>
       <span class="text-ed-line-strong">·</span>
       <span class="text-ed-text-2">
         Stage {state.stage} — {stage()?.name}

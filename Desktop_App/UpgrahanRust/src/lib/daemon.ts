@@ -233,6 +233,9 @@ export const api = {
   init: () => post<SessionStatus>("/session/init"),
   status: () => request<SessionStatus>("/session/status"),
   loadGeoTiff: (path: string) => post<TileInfo>("/session/load", { path }),
+  /** Synthesizes a fresh archive centred on a location that has no loaded coverage. */
+  generateArchiveAt: (latitude: number, longitude: number) =>
+    post<SessionStatus>("/session/generate", { latitude, longitude }),
 
   // search -> Results
   searchText: (query: string, topK = 12) =>
@@ -259,6 +262,13 @@ export const api = {
   confirm: (id: string, notes = "") => post<void>(`/review/${id}/confirm`, { notes }),
   reject: (id: string, notes = "") => post<void>(`/review/${id}/reject`, { notes }),
   flag: (id: string, notes = "") => post<void>(`/review/${id}/flag`, { notes }),
+
+  /**
+   * Runs the evaluation suite and writes a report. Slow - tens of seconds - and it holds the
+   * daemon's session lock while it runs, so the UI must show progress rather than appear hung.
+   */
+  benchmark: (outputDirectory: string) =>
+    post<{ outputDirectory: string }>("/benchmark", { outputDirectory }),
 
   // export
   exportGeoJson: (path: string) => post<{ path: string }>("/export/geojson", { path }),

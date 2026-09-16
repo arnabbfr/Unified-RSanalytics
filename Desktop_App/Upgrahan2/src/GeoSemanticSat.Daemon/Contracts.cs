@@ -238,6 +238,10 @@ public static class Contracts
 
     public record ExportRequest(string Path);
 
+    public record GenerateArchiveRequest(double Latitude, double Longitude);
+
+    public record BenchmarkRequest(string OutputDirectory);
+
     public record SessionStatusDto(
         int IndexedPatches,
         int Candidates,

@@ -1,6 +1,8 @@
 import { createResource, createSignal, For, Show } from "solid-js";
 import IconSearch from "~icons/lucide/search";
 import IconSparkles from "~icons/lucide/sparkles";
+import IconCrosshair from "~icons/lucide/crosshair";
+import IconScanSearch from "~icons/lucide/scan-search";
 import { Button } from "~/components/Button";
 import { Select } from "~/components/Select";
 import {
@@ -84,6 +86,7 @@ function ResultThumbnail(props: { result: SearchResult; renderMode: VisualRender
 function ResultRow(props: { result: SearchResult }) {
   const [state, actions] = useApp();
   const centre = () => patchCentre(props.result.patch.bounds);
+  const canInspect = () => actions.canEnter(3);
 
   return (
     <Card class="flex items-center gap-3 p-3 transition-colors hover:bg-ed-ctl-hover">
@@ -107,13 +110,34 @@ function ResultRow(props: { result: SearchResult }) {
 
       <div class="flex shrink-0 flex-col items-end gap-2">
         <SimilarityScore value={props.result.similarityScore} />
-        <Button
-          variant="gray"
-          size="sm"
-          onClick={() => actions.findSimilar(props.result.patch.patchId)}
-        >
-          Find similar
-        </Button>
+        <div class="flex items-center gap-1.5">
+          <Button
+            variant="gray"
+            size="sm"
+            onClick={() => actions.findSimilar(props.result.patch.patchId)}
+          >
+            Find similar
+          </Button>
+          <Button
+            variant="gray"
+            size="sm"
+            title="Switch to Stage 2 with this Result's location pre-filled."
+            onClick={() => actions.targetLocation(centre())}
+          >
+            <IconCrosshair class="size-3.5" />
+            Target here
+          </Button>
+          <Button
+            variant="gray"
+            size="sm"
+            disabled={!canInspect()}
+            title={canInspect() ? undefined : "Change detection has to run first - Stage 3 isn't reachable yet."}
+            onClick={() => canInspect() && actions.setStage(3)}
+          >
+            <IconScanSearch class="size-3.5" />
+            Inspect changes
+          </Button>
+        </div>
       </div>
     </Card>
   );
@@ -148,6 +172,13 @@ export function StageFindImages() {
         return [...kept].sort((a, b) => time(a.patch.timestamp) - time(b.patch.timestamp));
       case "quality":
         return [...kept].sort((a, b) => b.patch.qualityScore - a.patch.qualityScore);
+      case "area":
+        // patchWidth * patchHeight is pixel area, not true ground area - GSD varies by
+        // platform and tile, so this is a proxy, not a physical measurement.
+        return [...kept].sort(
+          (a, b) =>
+            b.patch.patchWidth * b.patch.patchHeight - a.patch.patchWidth * a.patch.patchHeight,
+        );
       default:
         return kept; // the daemon already returns these ranked by similarity
     }
@@ -198,6 +229,7 @@ export function StageFindImages() {
               { value: "newest" as const, label: "Newest first" },
               { value: "oldest" as const, label: "Oldest first" },
               { value: "quality" as const, label: "Best image quality first" },
+              { value: "area" as const, label: "Largest area first" },
             ]}
             onChange={actions.setSortOrder}
           />

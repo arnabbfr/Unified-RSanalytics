@@ -8,6 +8,8 @@ using GeoSemanticSat.Core.Raster;
 using GeoSemanticSat.Core.Synthetic;
 using GeoSemanticSat.Core.VectorIndex;
 using GeoSemanticSat.Core.Workflow;
+using System.IO;
+using GeoSemanticSat.Engine.Benchmark;
 using GeoSemanticSat.Engine.Embeddings;
 using GeoSemanticSat.Engine.Retrieval;
 using VectorIndexStore = GeoSemanticSat.Core.VectorIndex.VectorIndex;
@@ -76,6 +78,54 @@ public sealed class AnalysisSession
             foreach (var candidate in _candidates) _reviewQueue.Enqueue(candidate);
 
             return BuildStatus();
+        }
+    }
+
+    /// <summary>
+    /// Rebuilds the archive centred on an arbitrary location and re-runs the default
+    /// analysis. Backs the "no coverage here" recovery path: an analyst who searches
+    /// outside the loaded scenes gets usable data there instead of an empty result.
+    /// </summary>
+    public Contracts.SessionStatusDto GenerateArchiveAt(double latitude, double longitude)
+    {
+        lock (_lock)
+        {
+            _tiles.Clear();
+            _reviewQueue.Clear();
+            _index = new VectorIndexStore(SemanticEmbeddingLayout.Dimension);
+            _changeSearch = new ChangeSearchEngine();
+            _searchEngine = null;
+
+            _timeSeries = SyntheticScene.BuildArchiveAt(longitude, latitude);
+            foreach (var tile in _timeSeries) _tiles[tile.TileId] = tile;
+
+            var t1 = _timeSeries[0];
+            var t3 = _timeSeries[2];
+
+            Engine.IngestTile(t1, patchSize: 32);
+            Engine.IngestTile(t3, patchSize: 32);
+
+            _candidates = MultiTemporalChangeDetector.DetectChanges(t1, t3);
+            ResolveOnsets(t1, t3);
+
+            _changeSearch.AddRange(_candidates);
+            foreach (var candidate in _candidates) _reviewQueue.Enqueue(candidate);
+
+            return BuildStatus();
+        }
+    }
+
+    /// <summary>
+    /// Runs the evaluation suite. Slow (tens of seconds) and writes a report to disk, so the
+    /// caller should treat it as a long operation rather than a normal request.
+    /// </summary>
+    public string RunBenchmark(string outputDirectory)
+    {
+        lock (_lock)
+        {
+            Directory.CreateDirectory(outputDirectory);
+            BenchmarkRunner.Run(outputDirectory);
+            return outputDirectory;
         }
     }
 

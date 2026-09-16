@@ -139,6 +139,10 @@ app.MapPost("/session/init", (AnalysisSession s) => Results.Ok(s.Initialize()));
 app.MapGet("/session/status", (AnalysisSession s) => Results.Ok(s.Status()));
 app.MapPost("/session/load", (AnalysisSession s, Contracts.ExportRequest req) =>
     Results.Ok(s.LoadGeoTiff(req.Path)));
+app.MapPost("/session/generate", (AnalysisSession s, Contracts.GenerateArchiveRequest req) =>
+    Results.Ok(s.GenerateArchiveAt(req.Latitude, req.Longitude)));
+app.MapPost("/benchmark", (AnalysisSession s, Contracts.BenchmarkRequest req) =>
+    Results.Ok(new { outputDirectory = s.RunBenchmark(req.OutputDirectory) }));
 
 // ---- search (returns Results - see CONTEXT.md) ----
 app.MapPost("/search/text", (AnalysisSession s, Contracts.TextSearchRequest req) =>

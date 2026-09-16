@@ -3,6 +3,7 @@ import { createStore } from "solid-js/store";
 import {
   api,
   type ChangeRecord,
+  type Coord,
   type SensorPlatform,
   type Cluster,
   type ReviewItem,
@@ -43,13 +44,19 @@ interface AppState {
   results: SearchResult[];
   renderMode: VisualRenderMode;
   sensorFilter: SensorPlatform | "All";
-  sortOrder: "similarity" | "newest" | "oldest" | "quality";
+  sortOrder: "similarity" | "newest" | "oldest" | "quality" | "area";
   searching: boolean;
 
   // Stage 2 / 3
   candidates: ChangeRecord[];
   selectedCandidateId: string | null;
   detecting: boolean;
+  /**
+   * A location handed off from a Stage 1 Result via "Target here". Stage 2 (StagePickLocation)
+   * should read this on mount to pre-fill its target and then call `clearPendingTarget()` -
+   * this store only carries the handoff, it does not consume it.
+   */
+  pendingTarget: Coord | null;
 
   // Stage 4
   clusters: Cluster[];
@@ -77,6 +84,7 @@ const initial: AppState = {
   candidates: [],
   selectedCandidateId: null,
   detecting: false,
+  pendingTarget: null,
   clusters: [],
   clustering: false,
   review: [],
@@ -103,8 +111,10 @@ function createAppStore() {
         await actions.refreshReview();
 
         // Open with content rather than an empty state, matching the Avalonia app, which
-        // runs a default query as part of initialising the archive.
+        // runs a default query AND a default clustering pass as part of initialising the
+        // archive. Without the clustering pass stage 4 opens empty and its map never mounts.
         await actions.search(state.query);
+        await actions.cluster();
       } catch (e) {
         setState("connecting", false);
         fail(e);
@@ -140,7 +150,12 @@ function createAppStore() {
       }
     },
 
-    async detect(options: Record<string, unknown>) {
+    /**
+     * `t2Handle` overrides which loaded tile stands in as the "after" pass - used to
+     * re-compare the baseline against a different acquisition from the multi-pass timeline.
+     * Defaults to the 3rd loaded tile, matching the original T1-vs-T2 behaviour.
+     */
+    async detect(options: Record<string, unknown> & { t2Handle?: string }) {
       const tiles = state.session?.tiles ?? [];
       if (tiles.length < 3) return;
 
@@ -212,6 +227,25 @@ function createAppStore() {
       }
     },
 
+    /**
+     * Synthesizes an archive around a location that fell outside loaded coverage, then
+     * refreshes the session-derived state. The caller (Stage 2's area search) is responsible
+     * for re-running its own search afterward - that search's parameters are local to the
+     * stage, not something the store tracks.
+     */
+    async generateArchiveAt(latitude: number, longitude: number) {
+      setState({ searching: true, error: null });
+      try {
+        const session = await api.generateArchiveAt(latitude, longitude);
+        const candidates = await api.candidates();
+        setState({ session, candidates, searching: false });
+        await actions.refreshReview();
+      } catch (e) {
+        setState("searching", false);
+        fail(e);
+      }
+    },
+
     /** Rocchio relevance feedback: re-ranks using the analyst's confirmed/rejected verdicts. */
     async rerank() {
       const verified = state.review.filter((i) => i.status === "Confirmed");
@@ -238,6 +272,16 @@ function createAppStore() {
         fail(e);
       }
     },
+
+    /**
+     * Hands a location off to Stage 2 from a Stage 1 Result ("Target here"). Opens the gate
+     * on Stage 2 the same way a completed Stage 1 search would.
+     */
+    targetLocation: (coord: Coord) => {
+      setState({ pendingTarget: coord, completed: { ...state.completed, 1: true } });
+      actions.setStage(2);
+    },
+    clearPendingTarget: () => setState("pendingTarget", null),
 
     setStage: (stage: StageId) => setState("stage", stage),
     setSensorFilter: (sensorFilter: AppState["sensorFilter"]) => setState("sensorFilter", sensorFilter),
