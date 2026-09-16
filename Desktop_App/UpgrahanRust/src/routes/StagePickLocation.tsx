@@ -1,7 +1,7 @@
 import { createEffect, createMemo, createResource, createSignal, For, Show } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
-import toast from "solid-toast";
+import { notify, messageOf } from "~/lib/notify";
 import IconCheck from "~icons/lucide/check";
 import IconDownloadCloud from "~icons/lucide/download-cloud";
 import IconImport from "~icons/lucide/import";
@@ -295,7 +295,7 @@ export function StagePickLocation() {
 
       setCandidates(await api.searchChanges(body));
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(messageOf(e));
     } finally {
       setSearching(false);
       setHasSearched(true);
@@ -467,14 +467,14 @@ export function StagePickLocation() {
     try {
       providers = await invoke<TileProviderInfo[]>("tile_providers");
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : String(e));
+      notify.error(messageOf(e));
       return;
     }
     // ponytail: targets the app's default basemap, not whatever MapCanvas's own selector is
     // currently showing - that selection is internal to MapCanvas and not exposed upward.
     const provider = providers.find((p) => p.id === DEFAULT_PROVIDER_ID) ?? providers[0];
     if (!provider) {
-      toast.error("No basemap provider is available to cache.");
+      notify.error("No basemap provider is available to cache.");
       return;
     }
 
@@ -537,7 +537,7 @@ export function StagePickLocation() {
 
     await Promise.all(Array.from({ length: PRECACHE_CONCURRENCY }, () => worker()));
     setCaching(false);
-    toast.success(`Cached ${tiles.length} tile${tiles.length === 1 ? "" : "s"} for offline use.`);
+    notify.success(`Cached ${tiles.length} tile${tiles.length === 1 ? "" : "s"} for offline use.`);
   }
 
   // --- Feature 8: no-coverage recovery actions. ---
@@ -569,7 +569,7 @@ export function StagePickLocation() {
         void search();
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(messageOf(e));
     }
   }
 
@@ -752,9 +752,11 @@ export function StagePickLocation() {
             variant="verify"
             class="w-full"
             disabled={candidates().length === 0}
-            onClick={() => actions.markComplete(2)}
+            // Gating is derived from the data now, so stage 3 is already open once
+            // candidates exist. This button's job is simply to go there.
+            onClick={() => actions.setStage(3)}
           >
-            Use these candidates
+            Inspect these candidates
           </Button>
         </div>
       </div>

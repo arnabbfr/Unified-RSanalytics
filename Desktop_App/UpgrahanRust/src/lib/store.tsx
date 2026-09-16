@@ -65,8 +65,6 @@ interface AppState {
   // Stage 5
   review: ReviewItem[];
 
-  // Gating: a stage unlocks only once the previous one produced something.
-  completed: Record<StageId, boolean>;
 }
 
 const initial: AppState = {
@@ -88,7 +86,6 @@ const initial: AppState = {
   clusters: [],
   clustering: false,
   review: [],
-  completed: { 1: false, 2: false, 3: false, 4: false, 5: false },
 };
 
 function createAppStore() {
@@ -132,7 +129,6 @@ function createAppStore() {
           results,
           explanation: explained.explanation,
           searching: false,
-          completed: { ...state.completed, 1: results.length > 0 },
         });
       } catch (e) {
         setState("searching", false);
@@ -171,7 +167,6 @@ function createAppStore() {
           detecting: false,
           // Ids are regenerated on every detect, so the old selection cannot survive.
           selectedCandidateId: candidates[0]?.id ?? null,
-          completed: { ...state.completed, 3: candidates.length > 0 },
         });
         await actions.refreshReview();
       } catch (e) {
@@ -187,7 +182,6 @@ function createAppStore() {
         setState({
           clusters,
           clustering: false,
-          completed: { ...state.completed, 4: clusters.length > 0 },
         });
       } catch (e) {
         setState("clustering", false);
@@ -207,7 +201,7 @@ function createAppStore() {
       try {
         await api[verdict](id, notes);
         const candidates = await api.candidates();
-        setState({ candidates, completed: { ...state.completed, 5: true } });
+        setState({ candidates });
         await actions.refreshReview();
       } catch (e) {
         fail(e);
@@ -278,7 +272,7 @@ function createAppStore() {
      * on Stage 2 the same way a completed Stage 1 search would.
      */
     targetLocation: (coord: Coord) => {
-      setState({ pendingTarget: coord, completed: { ...state.completed, 1: true } });
+      setState({ pendingTarget: coord });
       actions.setStage(2);
     },
     clearPendingTarget: () => setState("pendingTarget", null),
@@ -289,15 +283,38 @@ function createAppStore() {
     select: (id: string | null) => setState("selectedCandidateId", id),
     setRenderMode: (renderMode: VisualRenderMode) => setState("renderMode", renderMode),
     setQuery: (query: string) => setState("query", query),
-    markComplete: (stage: StageId) =>
-      setState("completed", { ...state.completed, [stage]: true }),
     clearError: () => setState("error", null),
 
     selectedCandidate: () =>
       state.candidates.find((c) => c.id === state.selectedCandidateId) ?? null,
 
     /** Stage N is reachable once stage N-1 produced a result. Stage 1 is always open. */
-    canEnter: (stage: StageId) => stage === 1 || state.completed[(stage - 1) as StageId],
+    /**
+     * What each stage has produced. One derivation, used for both the rail's count badge
+     * and the gate, so the two can never disagree.
+     */
+    stageCount: (stage: StageId): number =>
+      ({
+        1: state.results.filter((r) => r.similarityScore > 0).length,
+        2: state.candidates.length,
+        3: state.candidates.length,
+        4: state.clusters.length,
+        5: state.review.filter((i) => i.status !== "Pending").length,
+      })[stage],
+
+    /**
+     * A stage opens once the previous one has actually produced something.
+     *
+     * This used to be a Record of boolean flags written from five different places. Nothing
+     * ever set the stage-2 flag, so stage 3 was permanently locked, while the boot-time
+     * clustering pass set the stage-4 flag and unlocked stage 5 - a rail showing stages 4
+     * and 5 complete but not 3. Deriving it from the data removes the class of bug rather
+     * than fixing one instance of it.
+     */
+    canEnter: (stage: StageId) => stage === 1 || actions.stageCount((stage - 1) as StageId) > 0,
+
+    /** True when this stage has output of its own, i.e. the rail should tick it. */
+    isDone: (stage: StageId) => actions.stageCount(stage) > 0,
   };
 
   return [state, actions] as const;

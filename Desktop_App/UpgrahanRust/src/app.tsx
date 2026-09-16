@@ -2,7 +2,8 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { invoke } from "@tauri-apps/api/core";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { For, Match, Show, Switch, createSignal, onCleanup, onMount, type JSX } from "solid-js";
-import toast, { Toaster } from "solid-toast";
+import { Toaster } from "solid-toast";
+import { notify, messageOf } from "~/lib/notify";
 import IconX from "~icons/lucide/x";
 import IconMinus from "~icons/lucide/minus";
 import IconSquare from "~icons/lucide/square";
@@ -45,12 +46,12 @@ function Titlebar() {
     if (typeof outputDirectory !== "string") return;
 
     setBenchmarking(true);
-    const pending = toast.loading("Running the evaluation suite…");
+    const pending = notify.loading("Running the evaluation suite…");
     try {
       const { outputDirectory: written } = await api.benchmark(outputDirectory);
-      toast.success(`Evaluation report written to ${written}`, { id: pending });
+      notify.success(`Evaluation report written to ${written}`, { id: pending });
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : String(e), { id: pending });
+      notify.error(messageOf(e), { id: pending });
     } finally {
       setBenchmarking(false);
     }
@@ -58,7 +59,7 @@ function Titlebar() {
 
   const pickGeoTiff = () =>
     pickGeoTiffWith((path) => actions.loadGeoTiff(path)).catch((e) =>
-      toast.error(e instanceof Error ? e.message : String(e)),
+      notify.error(messageOf(e)),
     );
 
   onMount(async () => {
@@ -84,22 +85,8 @@ function Titlebar() {
         </span>
       </div>
 
-      <div data-tauri-drag-region class="flex flex-1 items-center justify-center gap-4">
-        <Show when={state.session}>
-          {(session) => (
-            <div class="flex items-center gap-4 text-[11px] text-ed-text-3">
-              <span>{session().indexedPatches} indexed</span>
-              <span class="text-ed-line-strong">·</span>
-              <span>
-                {session().candidates} candidate{session().candidates === 1 ? "" : "s"}
-                <Show when={session().highConfidenceCandidates > 0}>
-                  {" "}({session().highConfidenceCandidates} strong)
-                </Show>
-              </span>
-            </div>
-          )}
-        </Show>
-      </div>
+      {/* Spacer only. The counts that used to live here are already in the status bar. */}
+      <div data-tauri-drag-region class="flex-1" />
 
       <div class="flex items-center gap-1">
         <Button variant="ghost" size="sm" title="Load a GeoTIFF into the archive (Ctrl+O)" onClick={pickGeoTiff}>
@@ -181,20 +168,20 @@ const SHORTCUTS = [
 
 /** The help toast, shared by the titlebar button and the F1 binding. */
 function showShortcuts() {
-  toast(
-    () => (
-      <div class="flex flex-col gap-1">
-        <p class="text-[12px] font-medium text-ed-text-1">Keyboard shortcuts</p>
-        <For each={SHORTCUTS}>
-          {([key, what]) => (
-            <p class="text-[11px] text-ed-text-2">
-              <span class="font-mono text-ed-text-1">{key}</span> — {what}
-            </p>
-          )}
-        </For>
-      </div>
-    ),
-    { duration: 8000 },
+  notify.plain(
+    <div class="flex flex-col gap-1">
+      <p class="text-[12px] font-medium text-ed-text-1">Keyboard shortcuts</p>
+      <For each={SHORTCUTS}>
+        {([key, what]) => (
+          <p class="text-[11px] text-ed-text-2">
+            <span class="font-mono text-ed-text-1">{key}</span> — {what}
+          </p>
+        )}
+      </For>
+    </div>,
+    // A fixed id means pressing F1 twice replaces the list rather than stacking a
+    // second copy of it. notify supplies the close control and click-to-dismiss.
+    { duration: 12000, id: "shortcuts" },
   );
 }
 
@@ -227,19 +214,6 @@ function WindowButton(props: {
 function StageRail() {
   const [state, actions] = useApp();
 
-  /**
-   * Live count per stage, so the rail shows how much each step has produced rather than
-   * only whether it has been visited. Zero renders as nothing, not as "0" - an empty
-   * badge reads as "nothing here yet" without adding noise to every untouched stage.
-   */
-  const countFor = (stage: StageId): number =>
-    ({
-      1: state.results.filter((r) => r.similarityScore > 0).length,
-      2: state.candidates.length,
-      3: state.candidates.length,
-      4: state.clusters.length,
-      5: state.review.filter((i) => i.status !== "Pending").length,
-    })[stage];
 
   const canAdvance = () => state.stage < 5 && actions.canEnter((state.stage + 1) as StageId);
 
@@ -257,7 +231,7 @@ function StageRail() {
     <nav class="flex shrink-0 items-center gap-1 border-b border-ed-line bg-ed-card px-3 py-2">
       <For each={STAGES}>
         {(stage) => {
-          const done = () => state.completed[stage.id];
+          const done = () => actions.isDone(stage.id);
           const current = () => state.stage === stage.id;
           const enabled = () => actions.canEnter(stage.id);
 
@@ -292,14 +266,14 @@ function StageRail() {
               </span>
               <span class="hidden sm:inline">{stage.name}</span>
 
-              <Show when={countFor(stage.id) > 0}>
+              <Show when={actions.stageCount(stage.id) > 0}>
                 <span
                   class={cn(
                     "hidden rounded-full px-1.5 text-[10px] font-medium tabular-nums md:inline",
                     current() ? "bg-white/20 text-white" : "bg-ed-ctl-active text-ed-text-2",
                   )}
                 >
-                  {countFor(stage.id)}
+                  {actions.stageCount(stage.id)}
                 </span>
               </Show>
             </button>
@@ -364,7 +338,7 @@ function Shell() {
         if (e.key === "o" || e.key === "O") {
           e.preventDefault();
           void pickGeoTiffWith((path) => actions.loadGeoTiff(path)).catch((err) =>
-            toast.error(err instanceof Error ? err.message : String(err)),
+            notify.error(messageOf(err)),
           );
           return;
         }
@@ -411,7 +385,7 @@ function Shell() {
 
       const scenes = event.payload.paths.filter((p) => /\.tiff?$/i.test(p));
       if (scenes.length === 0) {
-        toast.error("Only .tif and .tiff scenes can be loaded.");
+        notify.error("Only .tif and .tiff scenes can be loaded.");
         return;
       }
 
@@ -419,7 +393,7 @@ function Shell() {
       // only the first silently discarded the rest of a multi-file drop.
       void (async () => {
         for (const scene of scenes) await actions.loadGeoTiff(scene);
-        if (scenes.length > 1) toast.success(`Loaded ${scenes.length} scenes.`);
+        if (scenes.length > 1) notify.success(`Loaded ${scenes.length} scenes.`);
       })();
     });
 
@@ -560,6 +534,11 @@ export function App() {
   return (
     <AppProvider>
       <Shell />
+      {/*
+        Toasts are click-to-dismiss (see the wrapper in showShortcuts and the toast calls):
+        solid-toast gives no affordance of its own, so a long-lived toast such as the
+        shortcut list could only be waited out.
+      */}
       <Toaster
         position="bottom-right"
         toastOptions={{

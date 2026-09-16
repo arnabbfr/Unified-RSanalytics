@@ -1,6 +1,6 @@
 import { save } from "@tauri-apps/plugin-dialog";
 import { createMemo, createSignal, For, Show } from "solid-js";
-import toast from "solid-toast";
+import { notify, messageOf } from "~/lib/notify";
 import IconDownload from "~icons/lucide/download";
 import IconLoaderCircle from "~icons/lucide/loader-circle";
 
@@ -101,9 +101,9 @@ export function StageReviewExport() {
     setExporting(true);
     try {
       await api.exportGeoJson(path);
-      toast.success("Audit trail exported");
+      notify.success("Audit trail exported");
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : String(e));
+      notify.error(messageOf(e));
     } finally {
       setExporting(false);
     }
