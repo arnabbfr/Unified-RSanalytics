@@ -215,7 +215,16 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     throw new Error(detail?.error ?? `${init?.method ?? "GET"} ${path} failed (${response.status})`);
   }
 
-  return response.status === 204 ? (undefined as T) : ((await response.json()) as T);
+  // An empty body is not always a 204. The verdict endpoints answer 200 with
+  // Content-Length: 0, and calling .json() on that throws "Unexpected end of JSON input"
+  // a long way from the cause. Treat "no content" as the condition rather than one status
+  // code, so this holds for any endpoint that legitimately returns nothing.
+  if (response.status === 204 || response.headers.get("content-length") === "0") {
+    return undefined as T;
+  }
+
+  const body = await response.text();
+  return (body ? JSON.parse(body) : undefined) as T;
 }
 
 const post = <T>(path: string, body?: unknown): Promise<T> =>

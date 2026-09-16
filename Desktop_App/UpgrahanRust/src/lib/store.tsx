@@ -70,7 +70,7 @@ interface AppState {
 }
 
 const initial: AppState = {
-  stage: 2,
+  stage: 1,
   connecting: true,
   error: null,
   session: null,

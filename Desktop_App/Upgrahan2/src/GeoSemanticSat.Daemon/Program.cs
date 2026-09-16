@@ -167,12 +167,14 @@ app.MapPost("/cluster", (AnalysisSession s, Contracts.ClusterRequest req) =>
 
 // ---- review / triage ----
 app.MapGet("/review", (AnalysisSession s) => Results.Ok(s.Review()));
+// NoContent, not Ok: these succeed without returning anything, and Results.Ok() emits a
+// 200 with an empty body, which a JSON client cannot distinguish from a truncated response.
 app.MapPost("/review/{id}/confirm", (AnalysisSession s, string id, Contracts.VerdictRequest req) =>
-    s.Confirm(id, req.Notes) ? Results.Ok() : Results.NotFound());
+    s.Confirm(id, req.Notes) ? Results.NoContent() : Results.NotFound());
 app.MapPost("/review/{id}/reject", (AnalysisSession s, string id, Contracts.VerdictRequest req) =>
-    s.Reject(id, req.Notes) ? Results.Ok() : Results.NotFound());
+    s.Reject(id, req.Notes) ? Results.NoContent() : Results.NotFound());
 app.MapPost("/review/{id}/flag", (AnalysisSession s, string id, Contracts.VerdictRequest req) =>
-    s.Flag(id, req.Notes) ? Results.Ok() : Results.NotFound());
+    s.Flag(id, req.Notes) ? Results.NoContent() : Results.NotFound());
 
 // ---- export ----
 app.MapPost("/export/geojson", (AnalysisSession s, Contracts.ExportRequest req) =>
