@@ -540,8 +540,9 @@ jobs:
 
           In the universal bundle, start either `GeoSemanticSat.UI` or `upgrahan-rust`.
           Each has a control in its header that closes itself and reopens the other; the
-          Tauri side shows a five-second countdown you can cancel. Your loaded archive and
-          recorded verdicts are unaffected, because both drive the same analysis engine.
+          Tauri side shows a five-second countdown you can cancel. The frontend you switch
+          to **starts fresh** - only your choice of frontend is remembered, not the loaded
+          archive or recorded verdicts, so export anything you need to keep first.
 
           ---
 
@@ -582,6 +583,7 @@ jobs:
           tag_name: ${{ env.RELEASE_TAG }}
           name: ${{ env.RELEASE_TITLE }}
           body_path: RELEASE_NOTES.md
+          fail_on_unmatched_files: true
           draft: ${{ github.event.inputs.draft == 'true' }}
           prerelease: ${{ github.event.inputs.prerelease == 'true' }}
           files: |
