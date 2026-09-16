@@ -1,8 +1,8 @@
-# SatMAE++ Grouped Vision Transformer Sentinel-1 SAR Flood Segmentation Configuration
+# SatMAE++ Grouped Vision Transformer Sentinel-1 SAR + Optical Flood Segmentation Configuration
 model:
   name: satmaepp
   pretrained: BiliSakura/SATMAE-PP-transformers
-  in_channels: 3
+  in_channels: 8  # Full multi-sensor fusion: 2 SAR + 6 Optical bands
   feature_dim: 256
   decoder: unet_decoder
   unfreeze_last_n_blocks: 2
@@ -13,7 +13,13 @@ data:
   channels:
     - VV
     - VH
-  in_channels: 3
+    - B02
+    - B03
+    - B04
+    - B08
+    - B11
+    - B12
+  in_channels: 8
   image_size: 224
   num_classes: 1  # Binary flood mask (0: non-flood, 1: flood)
   ignore_index: -1
@@ -47,13 +53,13 @@ training:
 
 loss:
   type: compound
-  bce_weight: 0.4
-  dice_weight: 0.4
-  tversky_weight: 0.2
-  pos_weight: 5.5  # Calibrated for 85:15 Sen1Floods11 class imbalance
+  bce_weight: 0.35
+  dice_weight: 0.45
+  tversky_weight: 0.20
+  pos_weight: 3.5  # Calibrated for optimal Precision / Recall balance on flood boundaries
 
 evaluation:
-  threshold: 0.35  # Optimal F1 decision boundary for imbalanced remote sensing
+  threshold: 0.50  # Calibrated decision boundary maximizing F1 and eliminating false alarms
 
 checkpoint:
   dir: "fine_tune/checkpoints/satmaepp"

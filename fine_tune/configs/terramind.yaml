@@ -47,13 +47,13 @@ training:
 
 loss:
   type: compound  # Options: compound, combined, focal_tversky, bce, dice, tversky
-  bce_weight: 0.4
-  dice_weight: 0.4
-  tversky_weight: 0.2
-  pos_weight: 5.5  # Calibrated for 85:15 Sen1Floods11 class imbalance
+  bce_weight: 0.35
+  dice_weight: 0.45
+  tversky_weight: 0.20
+  pos_weight: 3.5  # Calibrated for optimal Precision / Recall balance on flood boundaries
 
 evaluation:
-  threshold: 0.35  # Optimal F1 decision boundary for imbalanced remote sensing
+  threshold: 0.50  # Calibrated decision boundary maximizing F1 and eliminating false alarms
 
 checkpoint:
   dir: "fine_tune/checkpoints/terramind"

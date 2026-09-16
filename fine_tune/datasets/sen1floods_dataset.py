@@ -65,12 +65,12 @@ def read_geotiff(path: Path | str) -> np.ndarray:
 
 def normalize_sar(
     arr: np.ndarray,
-    vv_min: float = -30.0,
+    vv_min: float = -25.0,
     vv_max: float = 0.0,
-    vh_min: float = -35.0,
+    vh_min: float = -32.0,
     vh_max: float = -5.0,
 ) -> np.ndarray:
-    """Decibel conversion and robust min-max normalization for Sentinel-1 (VV, VH)."""
+    """Decibel conversion for SAR (VV, VH) and robust reflectance scaling for Optical bands."""
     normed = np.zeros_like(arr, dtype=np.float32)
 
     for c in range(arr.shape[0]):
@@ -85,25 +85,22 @@ def normalize_sar(
             continue
 
         c_min = float(np.min(valid))
+        c_max = float(np.max(valid))
 
-        # 1. Determine if channel is linear power (non-negative) or already dB
-        if c_min >= 0.0:
-            ch_clipped = np.clip(ch, 1e-5, None)
-            ch_db = 10.0 * np.log10(ch_clipped)
-        else:
-            ch_db = ch
-
-        # 2. Channel-specific dB bounds
-        if c == 0:
-            b_min, b_max = vv_min, vv_max
-        elif c == 1:
-            b_min, b_max = vh_min, vh_max
-        else:
-            p2 = float(np.nanpercentile(ch_db, 2))
-            p98 = float(np.nanpercentile(ch_db, 98))
-            b_min, b_max = p2, max(p98, p2 + 1e-4)
-
-        normed[c] = np.clip((ch_db - b_min) / (b_max - b_min + 1e-6), 0.0, 1.0)
+        if c == 0:  # Sentinel-1 VV
+            ch_db = 10.0 * np.log10(np.clip(ch, 1e-5, None)) if c_min >= 0.0 else ch
+            normed[c] = np.clip((ch_db - vv_min) / (vv_max - vv_min + 1e-6), 0.0, 1.0)
+        elif c == 1:  # Sentinel-1 VH
+            ch_db = 10.0 * np.log10(np.clip(ch, 1e-5, None)) if c_min >= 0.0 else ch
+            normed[c] = np.clip((ch_db - vh_min) / (vh_max - vh_min + 1e-6), 0.0, 1.0)
+        else:  # Sentinel-2 Optical bands (B02, B03, B04, B08, B11, B12, etc.)
+            if c_max > 100.0:  # Raw integer digital numbers / scaled reflectance
+                p2 = float(np.nanpercentile(valid, 2))
+                p98 = float(np.nanpercentile(valid, 98))
+                b_min, b_max = p2, max(p98, p2 + 10.0)
+                normed[c] = np.clip((ch - b_min) / (b_max - b_min + 1e-6), 0.0, 1.0)
+            else:
+                normed[c] = np.clip(ch, 0.0, 1.0)
 
     return np.nan_to_num(normed, nan=0.0, posinf=1.0, neginf=0.0)
 
@@ -355,8 +352,11 @@ class Sen1FloodsDataset(Dataset):
             vh_max=self.vh_max,
         )
 
-        # 4. Construct 3-channel SAR representation [VV, VH, VV - VH] if in_channels == 3
+        # 4. Construct channel representation matching self.in_channels
         if norm_img.shape[0] == 2 and self.in_channels == 3:
+            diff = np.clip(norm_img[0] - norm_img[1] + 0.5, 0.0, 1.0)
+            norm_img = np.stack([norm_img[0], norm_img[1], diff], axis=0)
+        elif norm_img.shape[0] >= 8 and self.in_channels == 3:
             diff = np.clip(norm_img[0] - norm_img[1] + 0.5, 0.0, 1.0)
             norm_img = np.stack([norm_img[0], norm_img[1], diff], axis=0)
         elif norm_img.shape[0] > self.in_channels:

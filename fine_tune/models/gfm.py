@@ -77,22 +77,31 @@ class GFMCompositionModel(FoundationModelBase):
         self.patch_size = patch_size
         self.pretrained_ref = pretrained_path_or_repo
 
-        # Initial stem projection for spatial skip connections (224 -> 112 -> 56 -> 28)
+        # Deep Hierarchical Multi-Scale Stem (224 -> 112 -> 56 -> 28 -> 14)
         self.stem_s2 = nn.Sequential(
-            nn.Conv2d(in_channels, 64, kernel_size=3, stride=2, padding=1, bias=False),
+            nn.Conv2d(in_channels, 64, kernel_size=7, stride=2, padding=3, bias=False),
             nn.BatchNorm2d(64),
             nn.GELU(),
+            nn.Dropout2d(p=0.10),
         )
         self.stem_s4 = nn.Sequential(
             nn.Conv2d(64, 64, kernel_size=3, stride=2, padding=1, bias=False),
             nn.BatchNorm2d(64),
             nn.GELU(),
+            nn.Dropout2d(p=0.10),
         )
         self.stem_s8 = nn.Sequential(
             nn.Conv2d(64, 128, kernel_size=3, stride=2, padding=1, bias=False),
             nn.BatchNorm2d(128),
             nn.GELU(),
+            nn.Dropout2d(p=0.10),
         )
+        self.stem_s16 = nn.Sequential(
+            nn.Conv2d(128, 256, kernel_size=3, stride=2, padding=1, bias=False),
+            nn.BatchNorm2d(256),
+            nn.GELU(),
+        )
+        self.trans_proj = nn.Conv2d(256, embed_dim, kernel_size=1)
 
         sar_c = min(in_channels, 2)
         opt_c = max(1, in_channels - 2) if in_channels > 2 else 4
@@ -143,19 +152,16 @@ class GFMCompositionModel(FoundationModelBase):
     def forward(self, x: torch.Tensor, **kwargs) -> Any:
         b, c, h, w = x.shape
 
-        # Extract spatial skip representations
-        s2 = self.stem_s2(x)
-        s4 = self.stem_s4(s2)
-        s8 = self.stem_s8(s4)
+        # Extract hierarchical spatial skip representations
+        s2 = self.stem_s2(x)      # (B, 64, 112, 112)
+        s4 = self.stem_s4(s2)     # (B, 64, 56, 56)
+        s8 = self.stem_s8(s4)     # (B, 128, 28, 28)
+        s16 = self.stem_s16(s8)   # (B, 256, 14, 14)
 
-        if c <= 2:
-            sar_x = x
-            opt_x = None
-        else:
-            sar_x = x[:, :2, :, :]
-            opt_x = x[:, 2:, :, :]
-
-        tokens, ph, pw = self.encoder(sar_x, opt_x)
+        # Transformer path
+        s16_p = self.trans_proj(s16)  # (B, embed_dim, 14, 14)
+        ph, pw = s16_p.shape[-2], s16_p.shape[-1]
+        tokens = s16_p.flatten(2).transpose(1, 2)
         num_patches = tokens.shape[1]
 
         if num_patches <= self.pos_embed.shape[1]:
@@ -183,6 +189,16 @@ class GFMCompositionModel(FoundationModelBase):
 
     def unfreeze_last_blocks(self, num_blocks: int = 2) -> None:
         self.freeze_backbone()
+        for param in self.stem_s2.parameters():
+            param.requires_grad = True
+        for param in self.stem_s4.parameters():
+            param.requires_grad = True
+        for param in self.stem_s8.parameters():
+            param.requires_grad = True
+        for param in self.stem_s16.parameters():
+            param.requires_grad = True
+        for param in self.trans_proj.parameters():
+            param.requires_grad = True
         for block in self.blocks[-num_blocks:]:
             for param in block.parameters():
                 param.requires_grad = True
