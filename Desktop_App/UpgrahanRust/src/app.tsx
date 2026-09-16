@@ -1,8 +1,7 @@
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { For, Match, Show, Switch, createSignal, onCleanup, onMount, type JSX } from "solid-js";
-import { Toaster } from "solid-toast";
-import { notify, messageOf } from "~/lib/notify";
+import { Notifications, notify, messageOf } from "~/lib/notify";
 import IconX from "~icons/lucide/x";
 import IconMinus from "~icons/lucide/minus";
 import IconSquare from "~icons/lucide/square";
@@ -517,26 +516,7 @@ export function App() {
   return (
     <AppProvider>
       <Shell />
-      {/*
-        Toasts are click-to-dismiss (see the wrapper in showShortcuts and the toast calls):
-        solid-toast gives no affordance of its own, so a long-lived toast such as the
-        shortcut list could only be waited out.
-      */}
-      <Toaster
-        position="bottom-right"
-        toastOptions={{
-          duration: 3500,
-          style: {
-            padding: "8px 14px",
-            "border-radius": "12px",
-            border: "1px solid var(--ed-line)",
-            "font-size": "13px",
-            "background-color": "var(--ed-card)",
-            color: "var(--ed-text-1)",
-            "box-shadow": "var(--ed-pop-shadow)",
-          },
-        }}
-      />
+      <Notifications />
     </AppProvider>
   );
 }

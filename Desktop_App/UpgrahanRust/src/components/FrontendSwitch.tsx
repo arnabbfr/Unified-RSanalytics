@@ -82,6 +82,7 @@ export function FrontendSwitch() {
     }
   };
 
+
   const start = () => {
     clearTimers();
     setTakeover({ sentence: 0, remaining: COUNTDOWN_FROM, error: null });

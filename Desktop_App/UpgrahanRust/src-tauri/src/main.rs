@@ -60,6 +60,14 @@ fn avalonia_target() -> handoff::HandoffTarget {
 fn switch_to_avalonia(app: tauri::AppHandle) -> Result<(), String> {
     handoff::switch_to_avalonia()?;
 
+    // Stop the analysis daemon explicitly rather than relying on the window-destroyed
+    // handler: app.exit does not reliably deliver that event, and the Avalonia build runs
+    // its analysis in-process, so a surviving daemon is pure waste holding a loopback port.
+    // Left alone it accumulates one orphan per switch.
+    if let Some(state) = app.try_state::<DaemonState>() {
+        state.shutdown();
+    }
+
     // Give the child a moment to get its window up before this one disappears, so the
     // desktop is never briefly empty.
     std::thread::sleep(std::time::Duration::from_millis(600));
