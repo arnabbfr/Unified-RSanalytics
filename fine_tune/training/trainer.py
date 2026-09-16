@@ -208,19 +208,14 @@ class FoundationModelTrainer:
                 loss_scaled.backward()
 
             if (step + 1) % self.grad_accum_steps == 0 or (step + 1) == num_batches:
+                trainable_params = [p for p in list(self.model.parameters()) + list(self.decoder.parameters()) if p.requires_grad]
                 if self.scaler is not None and self.mixed_precision:
                     self.scaler.unscale_(self.optimizer)
-                    torch.nn.utils.clip_grad_norm_(
-                        list(self.model.parameters()) + list(self.decoder.parameters()),
-                        self.max_grad_norm,
-                    )
+                    grad_norm = torch.nn.utils.clip_grad_norm_(trainable_params, self.max_grad_norm)
                     self.scaler.step(self.optimizer)
                     self.scaler.update()
                 else:
-                    torch.nn.utils.clip_grad_norm_(
-                        list(self.model.parameters()) + list(self.decoder.parameters()),
-                        self.max_grad_norm,
-                    )
+                    grad_norm = torch.nn.utils.clip_grad_norm_(trainable_params, self.max_grad_norm)
                     self.optimizer.step()
 
                 self.optimizer.zero_grad()
@@ -229,7 +224,8 @@ class FoundationModelTrainer:
             self.metrics_tracker.update(logits.detach(), masks)
 
             if TQDM_AVAILABLE and isinstance(pbar, tqdm):
-                pbar.set_postfix({"loss": f"{loss.item():.4f}"})
+                gn_val = float(grad_norm.item()) if 'grad_norm' in locals() and hasattr(grad_norm, 'item') else 0.0
+                pbar.set_postfix({"loss": f"{loss.item():.4f}", "grad_norm": f"{gn_val:.3f}"})
 
         avg_loss = total_loss / num_batches
         metrics = self.metrics_tracker.compute()
@@ -299,12 +295,18 @@ class FoundationModelTrainer:
             curr_lr = self.optimizer.param_groups[-1]["lr"]
 
             # Monitor metric for early stopping and best checkpointing
-            monitor_key = self.ckpt_cfg.get("monitor", "val_iou").replace("val_", "")
-            current_metric = val_metrics.get(monitor_key, val_metrics.get("iou", 0.0))
+            monitor_key = self.ckpt_cfg.get("monitor", "val_dice").replace("val_", "")
+            if monitor_key == "loss":
+                current_metric = -val_loss
+            else:
+                raw_metric = val_metrics.get(monitor_key, val_metrics.get("dice", val_metrics.get("iou", 0.0)))
+                # If metric is 0 on early epoch, fallback to loss improvement
+                current_metric = raw_metric if raw_metric > 0.0 else -val_loss
+
             is_best = self.ckpt_manager.is_better(current_metric)
 
             if is_best:
-                best_metric_val = current_metric
+                best_metric_val = val_metrics.get(monitor_key, raw_metric if 'raw_metric' in locals() else current_metric)
                 best_epoch = epoch
                 patience_counter = 0
             else:

@@ -2,6 +2,7 @@
 model:
   name: terramind
   pretrained: ibm-esa-geospatial/TerraMind-1.0-base
+  in_channels: 3
   feature_dim: 256
   decoder: unet_decoder  # Options: segmentation_decoder, unet_decoder
   unfreeze_last_n_blocks: 2
@@ -12,7 +13,7 @@ data:
   channels:
     - VV
     - VH
-  in_channels: 2
+  in_channels: 3
   image_size: 224
   num_classes: 1  # Binary flood mask (0: non-flood, 1: flood)
   ignore_index: -1
@@ -35,28 +36,29 @@ training:
   batch_size: 4
   num_workers: 2  # Set 2 on Linux/Colab/Kaggle
   learning_rate: 0.0003
-  backbone_learning_rate: 0.00003
+  backbone_learning_rate: 0.00005
   weight_decay: 0.01
   gradient_accumulation_steps: 1
   mixed_precision: true
   gradient_checkpointing: true
   max_grad_norm: 1.0
-  early_stopping_patience: 10
+  early_stopping_patience: 12
   seed: 42
 
 loss:
-  type: combined  # Options: combined, focal_tversky, bce, dice, tversky
-  bce_weight: 0.5
-  dice_weight: 0.5
-  pos_weight: 2.0
+  type: compound  # Options: compound, combined, focal_tversky, bce, dice, tversky
+  bce_weight: 0.4
+  dice_weight: 0.4
+  tversky_weight: 0.2
+  pos_weight: 5.5  # Calibrated for 85:15 Sen1Floods11 class imbalance
 
 evaluation:
-  threshold: 0.50
+  threshold: 0.35  # Optimal F1 decision boundary for imbalanced remote sensing
 
 checkpoint:
   dir: "fine_tune/checkpoints/terramind"
   save_best: true
-  monitor: val_iou
+  monitor: val_dice
   mode: max
 
 results:

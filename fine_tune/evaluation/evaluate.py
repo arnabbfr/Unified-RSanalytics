@@ -41,11 +41,13 @@ def evaluate_checkpoint(
 
     # Build Dataset and Loader
     data_cfg = config.data
+    in_channels = int(data_cfg.get("in_channels", 3))
     dataset = Sen1FloodsDataset(
         data_root=data_cfg.get("root", "fine_tune/data/sample_sen1floods11"),
         split=split,
         subset=data_cfg.get("subset", "all"),
         image_size=int(data_cfg.get("image_size", 224)),
+        in_channels=in_channels,
         augment=False,
         ignore_index=int(data_cfg.get("ignore_index", -1)),
     )
@@ -79,6 +81,14 @@ def evaluate_checkpoint(
         ignore_index=int(data_cfg.get("ignore_index", -1)),
     )
 
+    # Multi-threshold sweep trackers for full diagnostic visibility
+    sweep_trackers = {
+        0.25: SegmentationMetricsTracker(threshold=0.25, ignore_index=int(data_cfg.get("ignore_index", -1))),
+        0.35: tracker,
+        0.45: SegmentationMetricsTracker(threshold=0.45, ignore_index=int(data_cfg.get("ignore_index", -1))),
+        0.50: SegmentationMetricsTracker(threshold=0.50, ignore_index=int(data_cfg.get("ignore_index", -1))),
+    }
+
     print(f"\nEvaluating {config.model.name} on split: '{split}' ({len(dataset)} samples)...")
     with torch.no_grad():
         for images, masks, _ in loader:
@@ -87,13 +97,14 @@ def evaluate_checkpoint(
             features = model(images)
             target_size = (images.shape[-2], images.shape[-1])
             logits = decoder(features, target_size=target_size)
-            tracker.update(logits, masks)
+            for t in sweep_trackers.values():
+                t.update(logits, masks)
 
     metrics = tracker.compute()
 
     # Formatted Report
     print("=" * 65)
-    print(f"EVALUATION RESULTS -- {config.model.name.upper()} ({split.upper()} SET)")
+    print(f"EVALUATION RESULTS -- {config.model.name.upper()} ({split.upper()} SET | THRESHOLD: {eval_thresh})")
     print("=" * 65)
     print(f"  - Flood IoU (Jaccard):    {metrics['iou']:.4f}")
     print(f"  - Flood Dice / F1-Score:  {metrics['dice']:.4f}")
@@ -103,6 +114,14 @@ def evaluate_checkpoint(
     print(f"  - Overall Pixel Accuracy: {metrics['accuracy']:.4f}")
     print("-" * 65)
     print(f"  - Confusion Matrix: TP={metrics['tp']} | FP={metrics['fp']} | FN={metrics['fn']} | TN={metrics['tn']}")
+    print("=" * 65)
+
+    # Display Threshold Calibration Sweep
+    print("\n  [Threshold Calibration Curve]")
+    for th, trk in sweep_trackers.items():
+        res = trk.compute()
+        marker = " <-- (Selected)" if abs(th - eval_thresh) < 1e-3 else ""
+        print(f"    - Thresh {th:.2f}: Dice={res['dice']*100:.2f}% | Precision={res['precision']*100:.2f}% | Recall={res['recall']*100:.2f}% | IoU={res['iou']*100:.2f}%{marker}")
     print("=" * 65)
 
     # Save to JSON

@@ -355,8 +355,11 @@ class Sen1FloodsDataset(Dataset):
             vh_max=self.vh_max,
         )
 
-        # 4. Ensure channel dimension matches self.in_channels
-        if norm_img.shape[0] > self.in_channels:
+        # 4. Construct 3-channel SAR representation [VV, VH, VV - VH] if in_channels == 3
+        if norm_img.shape[0] == 2 and self.in_channels == 3:
+            diff = np.clip(norm_img[0] - norm_img[1] + 0.5, 0.0, 1.0)
+            norm_img = np.stack([norm_img[0], norm_img[1], diff], axis=0)
+        elif norm_img.shape[0] > self.in_channels:
             norm_img = norm_img[:self.in_channels]
         elif norm_img.shape[0] < self.in_channels:
             pad_width = ((0, self.in_channels - norm_img.shape[0]), (0, 0), (0, 0))

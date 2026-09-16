@@ -29,14 +29,16 @@ except ImportError:
 
 
 def create_sar_false_color(sar_img: np.ndarray) -> np.ndarray:
-    """Compose RGB visualization from 2-channel Sentinel-1 SAR (VV, VH, VV/VH ratio)."""
+    """Compose RGB visualization from Sentinel-1 SAR (VV, VH, diff/ratio)."""
     # sar_img: shape (C, H, W) normalized in [0, 1]
     c, h, w = sar_img.shape
-    vv = sar_img[0]
-    vh = sar_img[1] if c > 1 else vv
-    ratio = np.clip(vv / (vh + 1e-4), 0.0, 1.0)
-
-    rgb = np.stack([vv, vh, ratio], axis=-1)  # (H, W, 3)
+    if c >= 3:
+        rgb = np.stack([sar_img[0], sar_img[1], sar_img[2]], axis=-1)
+    else:
+        vv = sar_img[0]
+        vh = sar_img[1] if c > 1 else vv
+        ratio = np.clip(vv / (vh + 1e-4), 0.0, 1.0)
+        rgb = np.stack([vv, vh, ratio], axis=-1)
     return np.clip(rgb, 0.0, 1.0)
 
 
@@ -111,11 +113,13 @@ def generate_visualizations(
 
     # Dataset
     data_cfg = config.data
+    in_channels = int(data_cfg.get("in_channels", 3))
     dataset = Sen1FloodsDataset(
         data_root=data_cfg.get("root", "fine_tune/data/sample_sen1floods11"),
         split=split,
         subset=data_cfg.get("subset", "all"),
         image_size=int(data_cfg.get("image_size", 224)),
+        in_channels=in_channels,
         augment=False,
         ignore_index=int(data_cfg.get("ignore_index", -1)),
     )

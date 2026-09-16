@@ -32,7 +32,7 @@ class TerraMindPatchEmbed(nn.Module):
 class TerraMindTransformerBlock(nn.Module):
     """Transformer block with Multihead Attention and MLP."""
 
-    def __init__(self, embed_dim: int = 128, num_heads: int = 4, mlp_ratio: float = 4.0, dropout: float = 0.0):
+    def __init__(self, embed_dim: int = 128, num_heads: int = 4, mlp_ratio: float = 4.0, dropout: float = 0.10):
         super().__init__()
         self.norm1 = nn.LayerNorm(embed_dim)
         self.attn = nn.MultiheadAttention(embed_dim, num_heads, dropout=dropout, batch_first=True)
@@ -54,7 +54,46 @@ class TerraMindTransformerBlock(nn.Module):
         return x
 
 
-import torchvision.models as tv_models
+try:
+    import torchvision.models as tv_models
+    TORCHVISION_AVAILABLE = True
+except ImportError:
+    TORCHVISION_AVAILABLE = False
+
+
+class NativeBasicBlock(nn.Module):
+    """Standard residual block for ResNet architecture."""
+
+    def __init__(self, in_planes: int, planes: int, stride: int = 1, downsample: Optional[nn.Module] = None):
+        super().__init__()
+        self.conv1 = nn.Conv2d(in_planes, planes, kernel_size=3, stride=stride, padding=1, bias=False)
+        self.bn1 = nn.BatchNorm2d(planes)
+        self.relu = nn.ReLU(inplace=True)
+        self.conv2 = nn.Conv2d(planes, planes, kernel_size=3, stride=1, padding=1, bias=False)
+        self.bn2 = nn.BatchNorm2d(planes)
+        self.downsample = downsample
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        identity = x
+        out = self.relu(self.bn1(self.conv1(x)))
+        out = self.bn2(self.conv2(out))
+        if self.downsample is not None:
+            identity = self.downsample(x)
+        out += identity
+        return self.relu(out)
+
+
+def _make_res_layer(in_planes: int, planes: int, blocks: int, stride: int = 1) -> nn.Sequential:
+    downsample = None
+    if stride != 1 or in_planes != planes:
+        downsample = nn.Sequential(
+            nn.Conv2d(in_planes, planes, kernel_size=1, stride=stride, bias=False),
+            nn.BatchNorm2d(planes),
+        )
+    layers = [NativeBasicBlock(in_planes, planes, stride, downsample)]
+    for _ in range(1, blocks):
+        layers.append(NativeBasicBlock(planes, planes))
+    return nn.Sequential(*layers)
 
 
 class TerraMindModel(FoundationModelBase):
@@ -85,29 +124,44 @@ class TerraMindModel(FoundationModelBase):
         self.pretrained_ref = pretrained_path_or_repo
 
         # 1. Pretrained Hierarchical Residual Backbone
-        try:
-            weights = tv_models.ResNet34_Weights.DEFAULT if pretrained else None
-            resnet = tv_models.resnet34(weights=weights)
-        except Exception:
+        resnet = None
+        if TORCHVISION_AVAILABLE:
             try:
-                resnet = tv_models.resnet18(weights=None)
+                weights = tv_models.ResNet34_Weights.DEFAULT if pretrained else None
+                resnet = tv_models.resnet34(weights=weights)
             except Exception:
-                resnet = tv_models.resnet34(weights=None)
+                try:
+                    resnet = tv_models.resnet34(weights=None)
+                except Exception:
+                    resnet = None
 
-        # Adapt first 7x7 conv to SAR in_channels (2 for VV/VH)
-        self.conv1 = nn.Conv2d(in_channels, 64, kernel_size=7, stride=2, padding=3, bias=False)
-        if hasattr(resnet.conv1, "weight") and resnet.conv1.weight is not None:
-            with torch.no_grad():
-                w = resnet.conv1.weight.data
-                self.conv1.weight.data = w[:, :in_channels, :, :].clone()
+        if resnet is not None:
+            self.conv1 = nn.Conv2d(in_channels, 64, kernel_size=7, stride=2, padding=3, bias=False)
+            if hasattr(resnet.conv1, "weight") and resnet.conv1.weight is not None:
+                with torch.no_grad():
+                    w = resnet.conv1.weight.data
+                    if in_channels == 3 and w.shape[1] == 3:
+                        self.conv1.weight.data = w.clone()
+                    elif in_channels == 2 and w.shape[1] >= 2:
+                        self.conv1.weight.data = w[:, :2, :, :].clone()
+                    else:
+                        self.conv1.weight.data[:, :min(in_channels, w.shape[1]), :, :] = w[:, :min(in_channels, w.shape[1]), :, :].clone()
 
-        self.bn1 = resnet.bn1
-        self.relu = resnet.relu
-        self.maxpool = resnet.maxpool
-
-        self.layer1 = resnet.layer1  # 56x56, 64 channels
-        self.layer2 = resnet.layer2  # 28x28, 128 channels
-        self.layer3 = resnet.layer3  # 14x14, 256 channels
+            self.bn1 = resnet.bn1
+            self.relu = resnet.relu
+            self.maxpool = resnet.maxpool
+            self.layer1 = resnet.layer1  # 56x56, 64 channels
+            self.layer2 = resnet.layer2  # 28x28, 128 channels
+            self.layer3 = resnet.layer3  # 14x14, 256 channels
+        else:
+            # Native PyTorch ResNet34 Stem & Stages
+            self.conv1 = nn.Conv2d(in_channels, 64, kernel_size=7, stride=2, padding=3, bias=False)
+            self.bn1 = nn.BatchNorm2d(64)
+            self.relu = nn.ReLU(inplace=True)
+            self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
+            self.layer1 = _make_res_layer(64, 64, blocks=3, stride=1)
+            self.layer2 = _make_res_layer(64, 128, blocks=4, stride=2)
+            self.layer3 = _make_res_layer(128, 256, blocks=6, stride=2)
 
         # 2. Transformer Contextual Attention Bottleneck
         self.trans_proj = nn.Conv2d(256, embed_dim, kernel_size=1)
@@ -177,8 +231,14 @@ class TerraMindModel(FoundationModelBase):
         }
 
     def unfreeze_last_blocks(self, num_blocks: int = 2) -> None:
-        """Freeze stem and unfreeze the top residual stage + transformer blocks + projection."""
+        """Unfreeze stem (conv1, bn1), residual stages, transformer blocks, and skip projections."""
         self.freeze_backbone()
+        for param in self.conv1.parameters():
+            param.requires_grad = True
+        for param in self.bn1.parameters():
+            param.requires_grad = True
+        for param in self.layer1.parameters():
+            param.requires_grad = True
         for param in self.layer2.parameters():
             param.requires_grad = True
         for param in self.layer3.parameters():
