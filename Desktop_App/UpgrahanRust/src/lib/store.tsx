@@ -67,6 +67,14 @@ interface AppState {
   // Stage 5
   review: ReviewItem[];
 
+  /**
+   * Stages the ANALYST has acted in. Deliberately not derived from the data: boot runs a
+   * search, a detection pass and a clustering pass so the app opens with something to look
+   * at, and crediting the user for that made every stage tick before they touched anything.
+   * The count badge already says "there is data here"; this says "you did this".
+   */
+  touched: Record<StageId, boolean>;
+
 }
 
 const initial: AppState = {
@@ -88,6 +96,7 @@ const initial: AppState = {
   clusters: [],
   clustering: false,
   review: [],
+  touched: { 1: false, 2: false, 3: false, 4: false, 5: false },
 };
 
 function createAppStore() {
@@ -127,6 +136,10 @@ function createAppStore() {
         // archive. Without the clustering pass stage 4 opens empty and its map never mounts.
         await actions.search(state.query);
         await actions.cluster();
+
+        // Those two ran on the app's initiative, not the analyst's. Clear the credit they
+        // just claimed so the rail starts honest and fills in as real work is done.
+        setState("touched", { 1: false, 2: false, 3: false, 4: false, 5: false });
       } catch (e) {
         setState("connecting", false);
         fail(e);
@@ -144,6 +157,7 @@ function createAppStore() {
           results,
           explanation: explained.explanation,
           searching: false,
+          touched: { ...state.touched, 1: true },
         });
       } catch (e) {
         setState("searching", false);
@@ -180,6 +194,7 @@ function createAppStore() {
         setState({
           candidates,
           detecting: false,
+          touched: { ...state.touched, 3: true },
           // Ids are regenerated on every detect, so the old selection cannot survive.
           selectedCandidateId: candidates[0]?.id ?? null,
         });
@@ -197,6 +212,7 @@ function createAppStore() {
         setState({
           clusters,
           clustering: false,
+          touched: { ...state.touched, 4: true },
         });
       } catch (e) {
         setState("clustering", false);
@@ -216,7 +232,7 @@ function createAppStore() {
       try {
         await api[verdict](id, notes);
         const candidates = await api.candidates();
-        setState({ candidates });
+        setState({ candidates, touched: { ...state.touched, 5: true } });
         await actions.refreshReview();
       } catch (e) {
         fail(e);
@@ -292,6 +308,9 @@ function createAppStore() {
     },
     clearPendingTarget: () => setState("pendingTarget", null),
 
+    /** For stages whose work happens in their own component (stage 2's area search). */
+    markTouched: (stage: StageId) => setState("touched", { ...state.touched, [stage]: true }),
+
     setStage: (stage: StageId) => setState("stage", stage),
     setSensorFilter: (sensorFilter: AppState["sensorFilter"]) => setState("sensorFilter", sensorFilter),
     setSortOrder: (sortOrder: AppState["sortOrder"]) => setState("sortOrder", sortOrder),
@@ -328,8 +347,12 @@ function createAppStore() {
      */
     canEnter: (stage: StageId) => stage === 1 || actions.stageCount((stage - 1) as StageId) > 0,
 
-    /** True when this stage has output of its own, i.e. the rail should tick it. */
-    isDone: (stage: StageId) => actions.stageCount(stage) > 0,
+    /**
+     * Tick = the analyst worked this stage and it produced something. Data alone is not
+     * enough: boot pre-populates stages 1, 3 and 4, and ticking those would tell the user
+     * they had finished work they have not started.
+     */
+    isDone: (stage: StageId) => state.touched[stage] && actions.stageCount(stage) > 0,
   };
 
   return [state, actions] as const;

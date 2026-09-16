@@ -293,7 +293,12 @@ export function StagePickLocation() {
       if (startDate()) body.startDate = startDate();
       if (endDate()) body.endDate = endDate();
 
-      setCandidates(await api.searchChanges(body));
+      const found = await api.searchChanges(body);
+      setCandidates(found);
+
+      // This stage's work happens here rather than in the store, so it reports its own
+      // engagement. Only a search the analyst ran counts - not the boot-time pass.
+      if (found.length > 0) actions.markTouched(2);
     } catch (e) {
       setError(messageOf(e));
     } finally {
