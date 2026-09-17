@@ -107,23 +107,31 @@ def normalize_sar(
 
 def resolve_dataset_path(data_root: str | Path) -> Path:
     """Resolve dataset path with auto-discovery for Kaggle and Colab environments."""
-    path = Path(data_root)
-    if path.exists():
-        return path
-
-    # Auto-detect Kaggle input directory
+    # 1. Prioritize attached Kaggle input datasets over local sample folder
     kaggle_root = Path("/kaggle/input")
     if kaggle_root.is_dir():
+        # Check if explicit path exists inside /kaggle/input
+        str_root = str(data_root)
+        if str_root.startswith("/kaggle/input") and Path(str_root).exists():
+            return Path(str_root)
+
+        # Auto-discover attached Sen1Floods11 / 8-channel dataset
         for candidate in kaggle_root.iterdir():
             if candidate.is_dir():
                 name_lower = candidate.name.lower()
-                if any(k in name_lower for k in ("sen1", "flood", "8channel", "dataset")):
+                if any(k in name_lower for k in ("sen1", "flood", "8channel", "dataset", "remote-sensing")):
                     print(f"[Dataset Auto-Resolution] Located Kaggle dataset at: {candidate}")
                     return candidate
+
         subdirs = [p for p in kaggle_root.iterdir() if p.is_dir()]
         if subdirs:
             print(f"[Dataset Auto-Resolution] Using Kaggle dataset: {subdirs[0]}")
             return subdirs[0]
+
+    # 2. Check local path or environment variable
+    path = Path(data_root)
+    if path.exists():
+        return path
 
     return path
 
