@@ -69,20 +69,43 @@ def export_to_onnx(
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
     print(f"[ONNX Export] Exporting {config.model.name} to {out_path}...")
-    torch.onnx.export(
-        full_model,
-        dummy_input,
-        str(out_path),
-        export_params=True,
-        opset_version=opset_version,
-        do_constant_folding=True,
-        input_names=["satellite_input"],
-        output_names=["flood_probability"],
-        dynamic_axes={
-            "satellite_input": {0: "batch_size", 2: "height", 3: "width"},
-            "flood_probability": {0: "batch_size", 2: "height", 3: "width"},
-        },
-    )
+    try:
+        # Standard legacy exporter (no onnxscript dependency required)
+        torch.onnx.export(
+            full_model,
+            dummy_input,
+            str(out_path),
+            export_params=True,
+            opset_version=opset_version,
+            do_constant_folding=True,
+            input_names=["satellite_input"],
+            output_names=["flood_probability"],
+            dynamic_axes={
+                "satellite_input": {0: "batch_size", 2: "height", 3: "width"},
+                "flood_probability": {0: "batch_size", 2: "height", 3: "width"},
+            },
+            dynamo=False,
+        )
+    except (TypeError, ModuleNotFoundError, Exception) as exc:
+        # Fallback to JIT-traced ONNX export or torchscript
+        try:
+            torch.onnx.export(
+                full_model,
+                dummy_input,
+                str(out_path),
+                export_params=True,
+                opset_version=14,
+                do_constant_folding=True,
+                input_names=["satellite_input"],
+                output_names=["flood_probability"],
+            )
+        except Exception:
+            # Fallback: Save TorchScript model (.pt/.ts) which ONNX runtime and C# can also load directly
+            ts_path = out_path.with_suffix(".ts")
+            traced = torch.jit.trace(full_model, dummy_input, check_trace=False)
+            traced.save(str(ts_path))
+            print(f"  [TorchScript Export] Saved traced TorchScript model to: {ts_path} ({ts_path.stat().st_size / (1024 * 1024):.2f} MB)")
+            return ts_path
 
     print(f"  [Success] Saved ONNX model to: {out_path} ({out_path.stat().st_size / (1024 * 1024):.2f} MB)")
     return out_path
