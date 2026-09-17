@@ -189,23 +189,30 @@ class CompoundFloodLoss(nn.Module):
 
 def build_loss_fn(loss_cfg: Dict[str, Any] | Any) -> nn.Module:
     """Factory function for instantiating loss modules based on configuration."""
-    loss_type = str(getattr(loss_cfg, "type", "compound") if hasattr(loss_cfg, "type") else loss_cfg.get("type", "compound")).lower()
-    pos_weight = getattr(loss_cfg, "pos_weight", 2.5) if hasattr(loss_cfg, "pos_weight") else loss_cfg.get("pos_weight", 2.5)
+    def _get(key: str, default: Any) -> Any:
+        if hasattr(loss_cfg, key):
+            return getattr(loss_cfg, key)
+        elif isinstance(loss_cfg, dict):
+            return loss_cfg.get(key, default)
+        return default
+
+    loss_type = str(_get("type", "compound")).lower()
+    pos_weight = _get("pos_weight", 2.5)
     pos_weight_val = float(pos_weight) if pos_weight is not None else 2.5
-    ignore_index = int(getattr(loss_cfg, "ignore_index", -1) if hasattr(loss_cfg, "ignore_index") else loss_cfg.get("ignore_index", -1))
-    bce_w = float(getattr(loss_cfg, "bce_weight", 0.35) if hasattr(loss_cfg, "bce_weight") else loss_cfg.get("bce_weight", 0.35))
-    dice_w = float(getattr(loss_cfg, "dice_weight", 0.45) if hasattr(loss_cfg, "dice_weight") else loss_cfg.get("dice_weight", 0.45))
-    tversky_w = float(getattr(loss_cfg, "tversky_weight", 0.20) if hasattr(loss_cfg, "tversky_weight") else loss_cfg.get("tversky_weight", 0.20))
-    alpha = float(getattr(loss_cfg, "alpha", 0.40) if hasattr(loss_cfg, "alpha") else loss_cfg.get("alpha", 0.40))
-    beta = float(getattr(loss_cfg, "beta", 0.60) if hasattr(loss_cfg, "beta") else loss_cfg.get("beta", 0.60))
-    gamma = float(getattr(loss_cfg, "gamma", 2.0) if hasattr(loss_cfg, "gamma") else loss_cfg.get("gamma", 2.0))
+    ignore_index = int(_get("ignore_index", -1))
+    bce_weight = float(_get("bce_weight", 0.35))
+    dice_weight = float(_get("dice_weight", 0.45))
+    tversky_weight = float(_get("tversky_weight", 0.20))
+    alpha = float(_get("alpha", 0.45))
+    beta = float(_get("beta", 0.55))
+    gamma = float(_get("gamma", 2.0))
 
     if loss_type in ("compound", "combined"):
         return CompoundFloodLoss(
             pos_weight=pos_weight_val,
-            bce_weight=bce_w,
-            dice_weight=dice_w,
-            tversky_weight=tversky_w,
+            bce_weight=bce_weight,
+            dice_weight=dice_weight,
+            tversky_weight=tversky_weight,
             alpha=alpha,
             beta=beta,
             gamma=gamma,
@@ -222,9 +229,9 @@ def build_loss_fn(loss_cfg: Dict[str, Any] | Any) -> nn.Module:
     else:
         return CompoundFloodLoss(
             pos_weight=pos_weight_val,
-            bce_weight=bce_w,
-            dice_weight=dice_w,
-            tversky_weight=tversky_w,
+            bce_weight=bce_weight,
+            dice_weight=dice_weight,
+            tversky_weight=tversky_weight,
             alpha=alpha,
             beta=beta,
             gamma=gamma,

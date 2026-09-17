@@ -144,17 +144,13 @@ class TerraMindModel(FoundationModelBase):
                         self.conv1.weight.data = w.clone()
                     elif in_channels == 2 and w.shape[1] >= 2:
                         self.conv1.weight.data = w[:, :2, :, :].clone()
-                    elif in_channels > 3:
-                        # Map RGB pretrained weights to optical bands [B02, B03, B04] (indices 2, 3, 4)
-                        # and mean RGB filters to SAR [VV, VH] (indices 0, 1) and NIR/SWIR [B08, B11, B12] (indices 5, 6, 7)
-                        mean_w = w.mean(dim=1, keepdim=True)
-                        for c in range(in_channels):
-                            if c in (2, 3, 4) and (c - 2) < w.shape[1]:
-                                self.conv1.weight.data[:, c : c + 1, :, :] = w[:, (c - 2) : (c - 1), :, :].clone()
-                            else:
-                                self.conv1.weight.data[:, c : c + 1, :, :] = mean_w.clone()
                     else:
-                        self.conv1.weight.data[:, :min(in_channels, w.shape[1]), :, :] = w[:, :min(in_channels, w.shape[1]), :, :].clone()
+                        c_copy = min(in_channels, w.shape[1])
+                        self.conv1.weight.data[:, :c_copy, :, :] = w[:, :c_copy, :, :].clone()
+                        if in_channels > w.shape[1]:
+                            w_mean = w.mean(dim=1, keepdim=True)
+                            for c in range(w.shape[1], in_channels):
+                                self.conv1.weight.data[:, c:c+1, :, :] = w_mean.clone()
 
             self.bn1 = resnet.bn1
             self.relu = resnet.relu

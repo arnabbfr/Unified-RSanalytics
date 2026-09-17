@@ -33,9 +33,9 @@ class GroupAwarePatchEmbed(nn.Module):
 
 
 class SatMaePPTransformerBlock(nn.Module):
-    """Group-aware ViT block."""
+    """Group-aware ViT block with Pre-LayerNorm stabilization."""
 
-    def __init__(self, embed_dim: int = 256, num_heads: int = 8, mlp_ratio: float = 4.0, dropout: float = 0.0):
+    def __init__(self, embed_dim: int = 256, num_heads: int = 8, mlp_ratio: float = 4.0, dropout: float = 0.05):
         super().__init__()
         self.norm1 = nn.LayerNorm(embed_dim)
         self.attn = nn.MultiheadAttention(embed_dim, num_heads, dropout=dropout, batch_first=True)
@@ -50,7 +50,9 @@ class SatMaePPTransformerBlock(nn.Module):
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = x + self.attn(self.norm1(x), self.norm1(x), self.norm1(x))[0]
+        norm_x = self.norm1(x)
+        attn_out, _ = self.attn(norm_x, norm_x, norm_x)
+        x = x + attn_out
         x = x + self.mlp(self.norm2(x))
         return x
 
@@ -86,19 +88,16 @@ class SatMaePPModel(FoundationModelBase):
             nn.Conv2d(in_channels, 64, kernel_size=7, stride=2, padding=3, bias=False),
             nn.BatchNorm2d(64),
             nn.GELU(),
-            nn.Dropout2d(p=0.10),
         )
         self.stem_s4 = nn.Sequential(
             nn.Conv2d(64, 64, kernel_size=3, stride=2, padding=1, bias=False),
             nn.BatchNorm2d(64),
             nn.GELU(),
-            nn.Dropout2d(p=0.10),
         )
         self.stem_s8 = nn.Sequential(
             nn.Conv2d(64, 128, kernel_size=3, stride=2, padding=1, bias=False),
             nn.BatchNorm2d(128),
             nn.GELU(),
-            nn.Dropout2d(p=0.10),
         )
         self.stem_s16 = nn.Sequential(
             nn.Conv2d(128, 256, kernel_size=3, stride=2, padding=1, bias=False),
@@ -111,7 +110,7 @@ class SatMaePPModel(FoundationModelBase):
         nn.init.trunc_normal_(self.pos_embed, std=0.02)
 
         self.blocks = nn.ModuleList([
-            SatMaePPTransformerBlock(embed_dim=embed_dim, num_heads=num_heads, dropout=0.10)
+            SatMaePPTransformerBlock(embed_dim=embed_dim, num_heads=num_heads, dropout=0.05)
             for _ in range(depth)
         ])
         self.norm = nn.LayerNorm(embed_dim)
