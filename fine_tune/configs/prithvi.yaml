@@ -1,0 +1,77 @@
+# Prithvi-EO-2.0-600M-TL Sentinel-1 SAR + Sentinel-2 Optical Flood Segmentation Configuration
+model:
+  name: prithvi
+  pretrained: ibm-nasa-geospatial/Prithvi-EO-2.0-600M-TL
+  in_channels: 8  # Full multi-sensor fusion: 2 SAR + 6 Optical bands
+  feature_dim: 256
+  decoder: unet_decoder
+  unfreeze_last_n_blocks: 2
+
+data:
+  dataset: sen1floods11
+  modality: sentinel1
+  channels:
+    - VV
+    - VH
+    - B02
+    - B03
+    - B04
+    - B08
+    - B11
+    - B12
+  in_channels: 8
+  image_size: 224
+  num_classes: 1  # Binary flood mask (0: non-flood, 1: flood)
+  ignore_index: -1
+  root: "${DATASET_ROOT:-fine_tune/data/sample_sen1floods11}"
+  subset: "all"
+  normalize:
+    type: sar_db_norm
+    vv_min: -25.0
+    vv_max: 0.0
+    vh_min: -32.0
+    vh_max: -5.0
+  augmentations:
+    random_flip: true
+    random_rotate: true
+    random_crop: false
+
+training:
+  strategy: partial
+  epochs: 25
+  batch_size: 4
+  num_workers: 2
+  learning_rate: 0.0003
+  backbone_learning_rate: 0.00005
+  weight_decay: 0.01
+  gradient_accumulation_steps: 1
+  mixed_precision: true
+  gradient_checkpointing: true
+  max_grad_norm: 1.0
+  early_stopping_patience: 12
+  seed: 42
+
+loss:
+  type: compound
+  bce_weight: 0.35
+  dice_weight: 0.45
+  tversky_weight: 0.20
+  pos_weight: 3.5  # Calibrated for optimal Precision / Recall balance on flood boundaries
+
+evaluation:
+  threshold: 0.50  # Calibrated decision boundary maximizing F1 and eliminating false alarms
+
+checkpoint:
+  dir: "fine_tune/checkpoints/prithvi"
+  save_best: true
+  monitor: val_dice
+  mode: max
+
+results:
+  dir: "fine_tune/results/prithvi"
+
+logging:
+  tensorboard: true
+  csv: true
+  log_interval: 10
+

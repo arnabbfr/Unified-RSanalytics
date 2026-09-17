@@ -34,6 +34,16 @@ Jyotirmoy_SETUP.md
 [Oo]bj/
 .dotnet/
 
+# Fine-tune model checkpoints, datasets, local results and binaries
+*.pt
+*.pth
+*.onnx
+*.bin
+fine_tune/checkpoints/
+fine_tune/data/
+fine_tune/results/
+fine_tune/scratch/
+
 # Local agent tooling, not part of the project
 .agents/
 .claude/
