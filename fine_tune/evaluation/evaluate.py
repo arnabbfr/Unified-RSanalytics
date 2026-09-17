@@ -81,7 +81,7 @@ def evaluate_checkpoint(
     model.to(device).eval()
     decoder.to(device).eval()
 
-    eval_thresh = float(config.get_nested("evaluation.threshold", 0.35))
+    eval_thresh = float(config.get_nested("evaluation.threshold", 0.50))
     tracker = SegmentationMetricsTracker(
         threshold=eval_thresh,
         ignore_index=int(data_cfg.get("ignore_index", -1)),
@@ -90,7 +90,7 @@ def evaluate_checkpoint(
     # Multi-threshold sweep trackers for full diagnostic visibility
     sweep_trackers = {
         0.25: SegmentationMetricsTracker(threshold=0.25, ignore_index=int(data_cfg.get("ignore_index", -1))),
-        0.35: tracker,
+        0.35: SegmentationMetricsTracker(threshold=0.35, ignore_index=int(data_cfg.get("ignore_index", -1))),
         0.45: SegmentationMetricsTracker(threshold=0.45, ignore_index=int(data_cfg.get("ignore_index", -1))),
         0.50: SegmentationMetricsTracker(threshold=0.50, ignore_index=int(data_cfg.get("ignore_index", -1))),
     }
@@ -103,6 +103,7 @@ def evaluate_checkpoint(
             features = model(images)
             target_size = (images.shape[-2], images.shape[-1])
             logits = decoder(features, target_size=target_size)
+            tracker.update(logits, masks)
             for t in sweep_trackers.values():
                 t.update(logits, masks)
 

@@ -1,8 +1,8 @@
-# TerraMind-1.0-base Sentinel-1 SAR Flood Segmentation Configuration
+# TerraMind-1.0-base Sentinel-1 SAR + Sentinel-2 Optical Flood Segmentation Configuration
 model:
   name: terramind
   pretrained: ibm-esa-geospatial/TerraMind-1.0-base
-  in_channels: 3
+  in_channels: 8  # Full multi-sensor fusion: 2 SAR + 6 Optical bands
   feature_dim: 256
   decoder: unet_decoder  # Options: segmentation_decoder, unet_decoder
   unfreeze_last_n_blocks: 2
@@ -13,7 +13,13 @@ data:
   channels:
     - VV
     - VH
-  in_channels: 3
+    - B02
+    - B03
+    - B04
+    - B08
+    - B11
+    - B12
+  in_channels: 8
   image_size: 224
   num_classes: 1  # Binary flood mask (0: non-flood, 1: flood)
   ignore_index: -1

@@ -5,7 +5,7 @@ model:
   in_channels: 8  # Full multi-sensor fusion: 2 SAR + 6 Optical bands
   feature_dim: 256
   decoder: unet_decoder
-  unfreeze_last_n_blocks: 2
+  unfreeze_last_n_blocks: 4
 
 data:
   dataset: sen1floods11
@@ -56,7 +56,9 @@ loss:
   bce_weight: 0.35
   dice_weight: 0.45
   tversky_weight: 0.20
-  pos_weight: 3.5  # Calibrated for optimal Precision / Recall balance on flood boundaries
+  pos_weight: 3.0  # Calibrated for optimal Precision / Recall balance
+  alpha: 0.45      # Precision weight (FP penalty)
+  beta: 0.55       # Recall weight (FN penalty)
 
 evaluation:
   threshold: 0.50  # Calibrated decision boundary maximizing F1 and eliminating false alarms

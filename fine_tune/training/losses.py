@@ -193,19 +193,43 @@ def build_loss_fn(loss_cfg: Dict[str, Any] | Any) -> nn.Module:
     pos_weight = getattr(loss_cfg, "pos_weight", 2.5) if hasattr(loss_cfg, "pos_weight") else loss_cfg.get("pos_weight", 2.5)
     pos_weight_val = float(pos_weight) if pos_weight is not None else 2.5
     ignore_index = int(getattr(loss_cfg, "ignore_index", -1) if hasattr(loss_cfg, "ignore_index") else loss_cfg.get("ignore_index", -1))
+    bce_w = float(getattr(loss_cfg, "bce_weight", 0.35) if hasattr(loss_cfg, "bce_weight") else loss_cfg.get("bce_weight", 0.35))
+    dice_w = float(getattr(loss_cfg, "dice_weight", 0.45) if hasattr(loss_cfg, "dice_weight") else loss_cfg.get("dice_weight", 0.45))
+    tversky_w = float(getattr(loss_cfg, "tversky_weight", 0.20) if hasattr(loss_cfg, "tversky_weight") else loss_cfg.get("tversky_weight", 0.20))
+    alpha = float(getattr(loss_cfg, "alpha", 0.40) if hasattr(loss_cfg, "alpha") else loss_cfg.get("alpha", 0.40))
+    beta = float(getattr(loss_cfg, "beta", 0.60) if hasattr(loss_cfg, "beta") else loss_cfg.get("beta", 0.60))
+    gamma = float(getattr(loss_cfg, "gamma", 2.0) if hasattr(loss_cfg, "gamma") else loss_cfg.get("gamma", 2.0))
 
     if loss_type in ("compound", "combined"):
-        return CompoundFloodLoss(pos_weight=pos_weight_val, ignore_index=ignore_index)
+        return CompoundFloodLoss(
+            pos_weight=pos_weight_val,
+            bce_weight=bce_w,
+            dice_weight=dice_w,
+            tversky_weight=tversky_w,
+            alpha=alpha,
+            beta=beta,
+            gamma=gamma,
+            ignore_index=ignore_index,
+        )
     elif loss_type == "dice":
         return GlobalBatchDiceLoss(ignore_index=ignore_index)
     elif loss_type == "focal":
-        return MaskedFocalLoss(ignore_index=ignore_index)
+        return MaskedFocalLoss(gamma=gamma, ignore_index=ignore_index)
     elif loss_type == "tversky":
-        return MaskedTverskyLoss(ignore_index=ignore_index)
+        return MaskedTverskyLoss(alpha=alpha, beta=beta, ignore_index=ignore_index)
     elif loss_type == "bce":
         return MaskedBCEWithLogitsLoss(pos_weight=pos_weight_val, ignore_index=ignore_index)
     else:
-        return CompoundFloodLoss(pos_weight=pos_weight_val, ignore_index=ignore_index)
+        return CompoundFloodLoss(
+            pos_weight=pos_weight_val,
+            bce_weight=bce_w,
+            dice_weight=dice_w,
+            tversky_weight=tversky_w,
+            alpha=alpha,
+            beta=beta,
+            gamma=gamma,
+            ignore_index=ignore_index,
+        )
 
 
 # Backward-compatible aliases
