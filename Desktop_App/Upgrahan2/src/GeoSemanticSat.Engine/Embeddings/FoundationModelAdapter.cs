@@ -35,10 +35,52 @@ public class FoundationModelAdapter : IDisposable
     public FoundationModelAdapter(FoundationModelKind modelKind = FoundationModelKind.NativeBaseline, string? onnxPath = null)
     {
         _modelKind = modelKind;
-        if (!string.IsNullOrEmpty(onnxPath) && System.IO.File.Exists(onnxPath))
+        string? resolvedPath = !string.IsNullOrEmpty(onnxPath) && System.IO.File.Exists(onnxPath) 
+            ? onnxPath 
+            : ResolveModelPath(modelKind);
+
+        if (!string.IsNullOrEmpty(resolvedPath) && System.IO.File.Exists(resolvedPath))
         {
-            _onnxRunner = new OnnxModelRunner(onnxPath);
+            _onnxRunner = new OnnxModelRunner(resolvedPath);
         }
+    }
+
+    /// <summary>
+    /// Auto-discover staged ONNX foundation model weights across standard repository directories.
+    /// </summary>
+    public static string? ResolveModelPath(FoundationModelKind kind)
+    {
+        string modelName = kind switch
+        {
+            FoundationModelKind.TerraMind => "terramind",
+            FoundationModelKind.SatMaePP => "satmaepp",
+            FoundationModelKind.GfmComposition => "gfm",
+            FoundationModelKind.PrithviTemporal => "prithvi",
+            _ => "baseline"
+        };
+
+        if (modelName == "baseline") return null;
+
+        string[] candidateSubpaths = new[]
+        {
+            Path.Combine("fine_tune", "checkpoints", modelName, "model.onnx"),
+            Path.Combine("..", "..", "..", "..", "..", "fine_tune", "checkpoints", modelName, "model.onnx"),
+            Path.Combine("models", modelName, "model.onnx"),
+            Path.Combine("models", $"{modelName}.onnx"),
+            Path.Combine("..", "..", "..", "..", "..", "models", $"{modelName}.onnx"),
+        };
+
+        foreach (var sub in candidateSubpaths)
+        {
+            try
+            {
+                string fullPath = Path.GetFullPath(sub);
+                if (File.Exists(fullPath)) return fullPath;
+            }
+            catch { }
+        }
+
+        return null;
     }
 
     /// <summary>
@@ -97,6 +139,62 @@ public class FoundationModelAdapter : IDisposable
 
         VectorIndexStore.NormalizeInPlace(embedding);
         return embedding;
+    }
+
+    /// <summary>
+    /// Run pixel-level flood inundation segmentation across a satellite tile.
+    /// Returns a 2D float array of flood probabilities in [0..1].
+    /// </summary>
+    public float[,] SegmentFloodInundation(SatelliteTile tile, float threshold = 0.50f)
+    {
+        int h = tile.Height;
+        int w = tile.Width;
+        float[,] probMap = new float[h, w];
+
+        if (IsNeuralActive && _onnxRunner != null)
+        {
+            float[]? neuralPred = RunNeuralInference(tile, 0, 0, w, h);
+            if (neuralPred != null && neuralPred.Length == h * w)
+            {
+                int idx = 0;
+                for (int y = 0; y < h; y++)
+                {
+                    for (int x = 0; x < w; x++)
+                    {
+                        probMap[y, x] = neuralPred[idx++];
+                    }
+                }
+                return probMap;
+            }
+        }
+
+        // Deterministic MNDWI / SAR Water Inundation Mapping
+        var green = tile.GetBandOrFallback(SpectralBand.Green, SpectralBand.Red);
+        var swir = tile.GetBandOrFallback(SpectralBand.SWIR1, SpectralBand.NIR);
+        bool hasSar = tile.HasBand(SpectralBand.SAR_VV);
+        var vv = hasSar ? tile.GetBandOrFallback(SpectralBand.SAR_VV, SpectralBand.Red) : null;
+
+        for (int y = 0; y < h; y++)
+        {
+            for (int x = 0; x < w; x++)
+            {
+                float g = green[y, x];
+                float s = swir[y, x];
+                float mndwi = (g - s) / (g + s + 1e-6f);
+
+                if (hasSar && vv != null)
+                {
+                    float sarVal = vv[y, x];
+                    probMap[y, x] = (mndwi > 0.15f || sarVal < 0.15f) ? 0.95f : 0.05f;
+                }
+                else
+                {
+                    probMap[y, x] = mndwi > 0.10f ? 0.90f : 0.10f;
+                }
+            }
+        }
+
+        return probMap;
     }
 
     private float[]? RunNeuralInference(SatelliteTile tile, int startX, int startY, int patchW, int patchH)

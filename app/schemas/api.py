@@ -163,3 +163,22 @@ class ChangeProvenanceResponse(BaseModel):
     before: str
     after: str
     evidence: dict
+
+
+class FloodSegmentationRequest(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    observation_id: str | None = Field(default=None, description="ID of ingested observation")
+    raster_path: str | None = Field(default=None, description="Direct relative GeoTIFF path under DATA_ROOT")
+    model_name: str = Field(default="terramind", description="Foundation model: terramind, satmaepp, prithvi, gfm")
+    threshold: float = Field(default=0.50, ge=0.0, le=1.0, description="Decision boundary threshold")
+
+
+class FloodSegmentationResponse(BaseModel):
+    model_name: str
+    status: str
+    flood_pixels: int
+    total_pixels: int
+    flood_fraction: float
+    threshold: float
+    overlay_path: str | None = None

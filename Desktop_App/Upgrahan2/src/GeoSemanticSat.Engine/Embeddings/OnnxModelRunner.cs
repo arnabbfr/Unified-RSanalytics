@@ -44,7 +44,8 @@ public class OnnxModelRunner : IDisposable
         try
         {
             var tensor = new DenseTensor<float>(inputTensor, dimensions);
-            var inputs = new NamedOnnxValue[] { NamedOnnxValue.CreateFromTensor("input", tensor) };
+            string inputName = _session.InputNames.Count > 0 ? _session.InputNames[0] : "input";
+            var inputs = new NamedOnnxValue[] { NamedOnnxValue.CreateFromTensor(inputName, tensor) };
             using var results = _session.Run(inputs);
             foreach (var r in results)
             {

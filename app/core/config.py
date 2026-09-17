@@ -19,11 +19,35 @@ class Settings(BaseSettings):
     model_root: Path = Field(default=PROJECT_ROOT / "models")
     index_root: Path = Field(default=PROJECT_ROOT / "indexes")
     remoteclip_weights_path: Path = Field(default=PROJECT_ROOT / "models" / "remoteclip" / "weights.pt")
-    terramind_model_path: Path = Field(default=PROJECT_ROOT / "models" / "terramind" / "terramind_base.pt")
-    satmae_pp_model_path: Path = Field(default=PROJECT_ROOT / "models" / "satmae_pp" / "satmae_pp_vit.pt")
-    gfm_model_path: Path = Field(default=PROJECT_ROOT / "models" / "gfm_composition" / "gfm_composition.pt")
-    prithvi_model_path: Path = Field(default=PROJECT_ROOT / "models" / "prithvi" / "prithvi_eo_2_600m_tl.pt")
-    eo_model_name: str = "baseline"
+    terramind_model_path: Path = Field(
+        default=(
+            PROJECT_ROOT / "fine_tune" / "checkpoints" / "terramind" / "best.pt"
+            if (PROJECT_ROOT / "fine_tune" / "checkpoints" / "terramind" / "best.pt").exists()
+            else PROJECT_ROOT / "models" / "terramind" / "terramind_base.pt"
+        )
+    )
+    satmae_pp_model_path: Path = Field(
+        default=(
+            PROJECT_ROOT / "fine_tune" / "checkpoints" / "satmaepp" / "best.pt"
+            if (PROJECT_ROOT / "fine_tune" / "checkpoints" / "satmaepp" / "best.pt").exists()
+            else PROJECT_ROOT / "models" / "satmae_pp" / "satmae_pp_vit.pt"
+        )
+    )
+    gfm_model_path: Path = Field(
+        default=(
+            PROJECT_ROOT / "fine_tune" / "checkpoints" / "gfm" / "best.pt"
+            if (PROJECT_ROOT / "fine_tune" / "checkpoints" / "gfm" / "best.pt").exists()
+            else PROJECT_ROOT / "models" / "gfm_composition" / "gfm_composition.pt"
+        )
+    )
+    prithvi_model_path: Path = Field(
+        default=(
+            PROJECT_ROOT / "fine_tune" / "checkpoints" / "prithvi" / "best.pt"
+            if (PROJECT_ROOT / "fine_tune" / "checkpoints" / "prithvi" / "best.pt").exists()
+            else PROJECT_ROOT / "models" / "prithvi" / "prithvi_eo_2_600m_tl.pt"
+        )
+    )
+    eo_model_name: str = "terramind"
     eo_model_weights_path: str = ""
     log_level: str = "INFO"
     max_ingest_raster_pixels: int = 100_000_000
@@ -38,6 +62,10 @@ class Settings(BaseSettings):
             self.model_root / "satmae_pp",
             self.model_root / "gfm_composition",
             self.model_root / "prithvi",
+            PROJECT_ROOT / "fine_tune" / "checkpoints" / "terramind",
+            PROJECT_ROOT / "fine_tune" / "checkpoints" / "satmaepp",
+            PROJECT_ROOT / "fine_tune" / "checkpoints" / "gfm",
+            PROJECT_ROOT / "fine_tune" / "checkpoints" / "prithvi",
         ):
             p.mkdir(parents=True, exist_ok=True)
 

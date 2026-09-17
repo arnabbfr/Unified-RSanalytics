@@ -54,6 +54,8 @@ from app.schemas.api import (
     ReviewResponse,
     ReviewItem,
     ChangeProvenanceResponse,
+    FloodSegmentationRequest,
+    FloodSegmentationResponse,
 )
 from app.services.embeddings.service import embedder, norm, get_available_models_status, PrithviTemporalEmbedder
 
@@ -740,3 +742,114 @@ def get_change_provenance(change_id: str, db: Session = Depends(get_db)):
         after=event.after_observation_id,
         evidence=event.evidence,
     )
+
+
+# ==============================================================================
+# Foundation Model Inference & Flood Segmentation Endpoints
+# ==============================================================================
+
+@app.get(
+    "/api/v1/models/status",
+    tags=["Foundation Models"],
+    summary="Get operational status of all fine-tuned foundation models",
+)
+def get_models_status():
+    """Return operational status, staged checkpoints, and dimensions of all geospatial foundation models."""
+    return get_available_models_status()
+
+
+@app.post(
+    "/api/v1/models/flood-segmentation",
+    response_model=FloodSegmentationResponse,
+    tags=["Foundation Models"],
+    summary="Run flood inundation segmentation using fine-tuned foundation models",
+)
+def run_flood_segmentation(
+    payload: FloodSegmentationRequest,
+    db: Session = Depends(get_db),
+):
+    """Execute high-precision flood boundary segmentation on an observation GeoTIFF using fine-tuned foundation models."""
+    # 1. Resolve raster path from observation ID or direct path
+    raster_file_path: Path | None = None
+    if payload.observation_id:
+        obs = db.get(Observation, payload.observation_id)
+        if not obs:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Observation {payload.observation_id} not found")
+        raster_file_path = settings.data_root / obs.file_path
+    elif payload.raster_path:
+        candidate = Path(payload.raster_path)
+        raster_file_path = candidate if candidate.is_file() else settings.data_root / payload.raster_path
+
+    if not raster_file_path or not raster_file_path.is_file():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Satellite raster file not found at: {raster_file_path}",
+        )
+
+    # 2. Check for fine-tuned checkpoint
+    model_name = payload.model_name.lower().strip()
+    ckpt_candidates = [
+        settings.PROJECT_ROOT / "fine_tune" / "checkpoints" / model_name / "best.pt",
+        settings.PROJECT_ROOT / "models" / model_name / "best.pt",
+    ]
+    ckpt_path = next((p for p in ckpt_candidates if p.is_file()), None)
+
+    # 3. Attempt neural inference via FloodPredictor
+    if ckpt_path is not None:
+        try:
+            from fine_tune.inference.predict import FloodPredictor
+
+            cfg_path = settings.PROJECT_ROOT / f"fine_tune/configs/{model_name}.yaml"
+            predictor = FloodPredictor(
+                checkpoint_path=ckpt_path,
+                config_path=cfg_path if cfg_path.is_file() else None,
+                model_name=model_name,
+                threshold=payload.threshold,
+            )
+
+            out_overlay = settings.data_root / "overlays" / f"{raster_file_path.stem}_{model_name}_flood.png"
+            result = predictor.predict(raster_file_path, save_overlay_path=out_overlay)
+
+            return FloodSegmentationResponse(
+                model_name=model_name,
+                status="neural (fine-tuned checkpoint)",
+                flood_pixels=result["flood_pixels"],
+                total_pixels=result["total_pixels"],
+                flood_fraction=round(result["flood_fraction"], 4),
+                threshold=payload.threshold,
+                overlay_path=str(out_overlay.relative_to(settings.PROJECT_ROOT)) if out_overlay.exists() else None,
+            )
+        except Exception as exc:
+            logger.warning("Neural flood prediction failed (%s); falling back to native MNDWI segmentation", exc)
+
+    # 4. Deterministic MNDWI / NDWI Water Extent Fallback
+    try:
+        with rasterio.open(raster_file_path) as src:
+            arr = src.read().astype(np.float32)
+            c, h, w = arr.shape
+            total_px = h * w
+
+            # Detect water via MNDWI (Green - SWIR) / (Green + SWIR) or SAR backscatter
+            if c >= 6:  # Sentinel-2 with Green (idx 1/2) and SWIR1 (idx 4/5)
+                green = arr[1] if c == 6 else arr[2]
+                swir = arr[4] if c == 6 else arr[5]
+                mndwi = (green - swir) / (green + swir + 1e-6)
+                flood_mask = mndwi > 0.10
+            elif c >= 2:  # SAR VV/VH
+                vv = arr[0]
+                vv_db = 10.0 * np.log10(np.clip(vv, 1e-5, None)) if np.min(vv) >= 0 else vv
+                flood_mask = vv_db < -16.0
+            else:
+                flood_mask = arr[0] < np.percentile(arr[0], 15)
+
+            flood_px = int(np.sum(flood_mask))
+            return FloodSegmentationResponse(
+                model_name=model_name,
+                status="fallback (deterministic MNDWI/SAR)",
+                flood_pixels=flood_px,
+                total_pixels=total_px,
+                flood_fraction=round(float(flood_px / max(total_px, 1)), 4),
+                threshold=payload.threshold,
+            )
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to process raster: {exc}")
